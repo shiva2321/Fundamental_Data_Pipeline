@@ -14,9 +14,22 @@ general:
   max_threads: 5
   sequential_processing: true
 mongodb:
+  collection: Fundamental_Data_Pipeline
   db_name: Entities
   uri: mongodb://localhost:27017
-  collection: Fundamental_Data_Pipeline
+profile_settings:
+  included_features:
+    anomalies: true
+    growth: true
+    health: true
+    lifecycle: true
+    ml_features: true
+    ratios: true
+    summary: true
+    trends: true
+    volatility: true
+  incremental_updates: false
+  lookback_years: 10
 rate_limits:
   polygon: 120
 update_frequency:

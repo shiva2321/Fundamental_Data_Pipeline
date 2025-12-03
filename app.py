@@ -12,21 +12,22 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 
 def main():
-    """Try to launch the PyQt5 GUI; fall back to Tkinter GUI on failure."""
-    # Try PyQt5-based desktop app
+    """Try to launch the PySide6 GUI; fall back to Tkinter GUI on failure."""
+    # Try PySide6-based desktop app (New Modern UI)
     try:
-        desktop_app = importlib.import_module('desktop_app')
+        desktop_app = importlib.import_module('desktop_app_pyside')
         if hasattr(desktop_app, 'main'):
             desktop_app.main()
             return
-    except SystemExit:
-        # desktop_app may call sys.exit on import when PyQt5 import fails.
-        pass
-    except Exception:
-        # Any other import error - fall through to Tkinter fallback
-        pass
+    except ImportError as e:
+        print(f"PySide6 app failed to load (missing dependency?): {e}")
+    except Exception as e:
+        print(f"Error launching PySide6 app: {e}")
+        import traceback
+        traceback.print_exc()
 
     # Fallback to Tkinter-based GUI
+    print("Falling back to Tkinter GUI...")
     try:
         tk_app = importlib.import_module('desktop_app_tk')
         if hasattr(tk_app, 'main'):
