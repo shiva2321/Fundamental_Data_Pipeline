@@ -1,0 +1,26 @@
+api_keys:
+  alpha_vantage: ''
+  news: ''
+  polygon: ''
+  reddit: ''
+collections:
+  daily_data: dailydata
+  fundamentals: fundamentals
+  minute_data: minutebyminute
+  profiles: profiles
+  sentiment: sentiment
+general:
+  default_output_dir: reports
+  max_threads: 5
+  sequential_processing: true
+mongodb:
+  db_name: Entities
+  uri: mongodb://localhost:27017
+  collection: Fundamental_Data_Pipeline
+rate_limits:
+  polygon: 120
+update_frequency:
+  fundamentals: DAILY
+  institutional: QUARTERLY
+  market_data: 15_MINUTES
+  sentiment: HOURLY
