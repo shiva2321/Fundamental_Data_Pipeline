@@ -24,12 +24,12 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
 from PySide6.QtCore import Qt, Signal, Slot, QObject
 from PySide6.QtGui import QFont, QColor
 
-from config import load_config
+from src.utils.config import load_config
 from src.clients.mongo_client import MongoWrapper
-from company_ticker_fetcher import CompanyTickerFetcher
-from unified_profile_aggregator import UnifiedSECProfileAggregator
-from sec_edgar_api_client import SECEdgarClient
-from visualization_window import ProfileVisualizationWindow
+from src.clients.company_ticker_fetcher import CompanyTickerFetcher
+from src.analysis.unified_profile_aggregator import UnifiedSECProfileAggregator
+from src.clients.sec_edgar_api_client import SECEdgarClient
+from src.ui.visualization_window import ProfileVisualizationWindow
 
 # Configure Logging
 logger = logging.getLogger("desktop_app_pyside")
@@ -194,7 +194,7 @@ class EnhancedBackgroundWorker(threading.Thread):
         
         # Email notification support
         try:
-            from email_notifier import EmailNotifier
+            from src.utils.email_notifier import EmailNotifier
             self.email_notifier = EmailNotifier(config)
         except Exception as e:
             logger.warning(f"Email notifier initialization failed: {e}")
@@ -1803,7 +1803,7 @@ class MainWindow(QMainWindow):
         period_to = self.profiles_table.item(row, 5).text() if self.profiles_table.item(row, 5) else "2025-12-03"
 
         try:
-            from profile_period_editor import ProfilePeriodEditorDialog
+            from src.ui.profile_period_editor import ProfilePeriodEditorDialog
 
             dialog = ProfilePeriodEditorDialog(ticker, cik, period_from, period_to, self)
             dialog.period_updated.connect(self.handle_period_update)
@@ -1864,7 +1864,7 @@ class MainWindow(QMainWindow):
                 continue
 
             try:
-                from visualization_window import ProfileVisualizationWindow
+                from src.ui.visualization_window import ProfileVisualizationWindow
                 viz_window = ProfileVisualizationWindow(profile, self.config, self)
                 viz_window.exec()
             except Exception as e:
@@ -1930,7 +1930,7 @@ class MainWindow(QMainWindow):
     def test_email_config(self):
         """Test email configuration by sending a test email."""
         try:
-            from email_notifier import EmailNotifier
+            from src.utils.email_notifier import EmailNotifier
 
             # Create temporary config with current UI values
             test_config = {
@@ -1998,7 +1998,7 @@ class MainWindow(QMainWindow):
             self.log_message("Opening Ollama Model Manager...")
 
             # Import and create dialog
-            from ollama_manager_dialog import OllamaManagerDialog
+            from src.ui.ollama_manager_dialog import OllamaManagerDialog
             dialog = OllamaManagerDialog(self)
 
             # Connect signal to update AI model dropdown when model is downloaded
@@ -2032,7 +2032,7 @@ class MainWindow(QMainWindow):
     def _check_ollama_status(self):
         """Check Ollama status and update the status indicator."""
         try:
-            from ollama_model_manager import OllamaModelManager
+            from src.utils.ollama_model_manager import OllamaModelManager
             manager = OllamaModelManager()
 
             if manager.is_ollama_running():

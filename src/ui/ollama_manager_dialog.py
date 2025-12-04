@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
 from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtGui import QFont
 
-from ollama_model_manager import OllamaModelManager
+from src.utils.ollama_model_manager import OllamaModelManager
 import logging
 
 logger = logging.getLogger(__name__)

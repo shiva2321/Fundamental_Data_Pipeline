@@ -233,7 +233,7 @@ class InstitutionalOwnershipAnalyzer:
     """
 
     def __init__(self):
-        from filing_content_parser import SECFilingContentFetcher, SC13ContentParser
+        from src.parsers.filing_content_parser import SECFilingContentFetcher, SC13ContentParser
         self.fetcher = SECFilingContentFetcher()
         self.parser = SC13ContentParser(self.fetcher)
 

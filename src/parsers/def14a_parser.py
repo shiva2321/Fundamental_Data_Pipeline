@@ -245,7 +245,7 @@ class ExecutiveCompensationAnalyzer:
     """
 
     def __init__(self):
-        from filing_content_parser import SECFilingContentFetcher, DEF14AContentParser
+        from src.parsers.filing_content_parser import SECFilingContentFetcher, DEF14AContentParser
         self.fetcher = SECFilingContentFetcher()
         self.parser = DEF14AContentParser(self.fetcher)
 
@@ -377,7 +377,7 @@ class BoardCompositionAnalyzer:
     """
 
     def __init__(self):
-        from filing_content_parser import SECFilingContentFetcher, DEF14AContentParser
+        from src.parsers.filing_content_parser import SECFilingContentFetcher, DEF14AContentParser
         self.fetcher = SECFilingContentFetcher()
         self.parser = DEF14AContentParser(self.fetcher)
 

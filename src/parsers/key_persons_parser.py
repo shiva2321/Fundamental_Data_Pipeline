@@ -31,7 +31,7 @@ class KeyPersonsParser:
     def __init__(self):
         """Initialize the KeyPersonsParser with content parsers."""
         try:
-            from filing_content_parser import SECFilingContentFetcher, Form4ContentParser, DEF14AContentParser, SC13ContentParser
+            from src.parsers.filing_content_parser import SECFilingContentFetcher, Form4ContentParser, DEF14AContentParser, SC13ContentParser
             self.fetcher = SECFilingContentFetcher()
             self.form4_parser = Form4ContentParser(self.fetcher)
             self.def14a_parser = DEF14AContentParser(self.fetcher)

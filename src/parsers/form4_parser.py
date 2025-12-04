@@ -234,7 +234,7 @@ class InsiderTransactionAnalyzer:
     """
 
     def __init__(self):
-        from filing_content_parser import SECFilingContentFetcher, Form4ContentParser
+        from src.parsers.filing_content_parser import SECFilingContentFetcher, Form4ContentParser
         self.fetcher = SECFilingContentFetcher()
         self.parser = Form4ContentParser(self.fetcher)
 

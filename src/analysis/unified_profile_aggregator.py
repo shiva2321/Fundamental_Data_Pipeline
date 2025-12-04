@@ -6,7 +6,7 @@ import numpy as np
 from typing import Dict, List, Any, Optional, Callable
 from datetime import datetime, timedelta
 from collections import Counter, defaultdict
-from sec_edgar_api_client import SECEdgarClient
+from src.clients.sec_edgar_api_client import SECEdgarClient
 
 logger = logging.getLogger("unified_sec_profile_aggregator")
 
@@ -140,7 +140,7 @@ class UnifiedSECProfileAggregator:
         # === SECTION 1.5: Material Events (8-K Filings) ===
         log('info', "Parsing material events from 8-K filings")
         try:
-            from form_8k_parser import Form8KParser
+            from src.parsers.form_8k_parser import Form8KParser
             parser_8k = Form8KParser()
             material_events = parser_8k.parse_8k_filings(filings)
             profile["material_events"] = material_events
@@ -158,7 +158,7 @@ class UnifiedSECProfileAggregator:
         # === SECTION 1.6: Corporate Governance (DEF 14A Filings) ===
         log('info', "Parsing corporate governance from DEF 14A filings")
         try:
-            from def14a_parser import DEF14AParser
+            from src.parsers.def14a_parser import DEF14AParser
             parser_def14a = DEF14AParser()
             governance_data = parser_def14a.parse_def14a_filings(filings)
             profile["corporate_governance"] = governance_data
@@ -174,7 +174,7 @@ class UnifiedSECProfileAggregator:
         # === SECTION 1.7: Insider Trading (Form 4 Filings) ===
         log('info', "Parsing insider trading from Form 4 filings")
         try:
-            from form4_parser import Form4Parser
+            from src.parsers.form4_parser import Form4Parser
             parser_form4 = Form4Parser()
             insider_data = parser_form4.parse_form4_filings(filings)
             profile["insider_trading"] = insider_data
@@ -190,7 +190,7 @@ class UnifiedSECProfileAggregator:
         # === SECTION 1.8: Institutional Ownership (SC 13D/G Filings) ===
         log('info', "Parsing institutional ownership from SC 13D/G filings")
         try:
-            from sc13_parser import SC13Parser
+            from src.parsers.sc13_parser import SC13Parser
             parser_sc13 = SC13Parser()
             ownership_data = parser_sc13.parse_sc13_filings(filings)
             profile["institutional_ownership"] = ownership_data
@@ -206,7 +206,7 @@ class UnifiedSECProfileAggregator:
         # === SECTION 1.9: Key Persons (Executives, Board, Insiders, Holdings) ===
         log('info', "Extracting key persons data (executives, board, insiders, holding companies)")
         try:
-            from key_persons_parser import KeyPersonsParser
+            from src.parsers.key_persons_parser import KeyPersonsParser
             key_persons_parser = KeyPersonsParser()
             key_persons_data = key_persons_parser.parse_key_persons(filings, cik)
             profile["key_persons"] = key_persons_data
@@ -328,7 +328,7 @@ class UnifiedSECProfileAggregator:
         if opts.get('ai_enabled', True):
             try:
                 log('info', "Performing AI/ML analysis on profile")
-                from ai_analyzer import AIAnalyzer
+                from src.analysis.ai_analyzer import AIAnalyzer
                 ai_analyzer = AIAnalyzer(opts.get('config', {}))
                 # Check if multi-model analysis is requested
                 selected_models = opts.get('ai_models', [])
