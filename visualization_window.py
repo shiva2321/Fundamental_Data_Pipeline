@@ -1564,7 +1564,7 @@ class ProfileVisualizationWindow(QDialog):
         # Board Independence
         board_ind = summary.get('board_independence', {})
         if board_ind.get('total_directors'):
-            ind_text = f"{board_ind.get('independent_directors', 0)} of {board_ind.get('total_directors', 0)} ({(board_ind.get('independence_ratio', 0) * 100):.0f}%)"
+            ind_text = f"{board_ind.get('independent_directors', 0)} of {board_ind.get('total_directors', 0)} ({(board_ind.get('independence_ratio', 0) * 100):.1f}%)"
             self._add_info_row(summary_layout, row, "Board Independence:", ind_text)
             row += 1
         
@@ -1629,7 +1629,16 @@ class ProfileVisualizationWindow(QDialog):
             for i, director in enumerate(actual_directors):
                 board_table.setItem(i, 0, QTableWidgetItem(director.get('name', 'Unknown')))
                 board_table.setItem(i, 1, QTableWidgetItem(director.get('role', 'Director')))
-                is_ind = "Yes" if director.get('is_independent') else "No" if director.get('is_independent') is False else "Unknown"
+                
+                # Determine independence status with clear logic
+                is_independent = director.get('is_independent')
+                if is_independent is True:
+                    is_ind = "Yes"
+                elif is_independent is False:
+                    is_ind = "No"
+                else:
+                    is_ind = "Unknown"
+                
                 ind_item = QTableWidgetItem(is_ind)
                 if is_ind == "Yes":
                     ind_item.setForeground(QColor("#00ff00"))

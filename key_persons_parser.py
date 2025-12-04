@@ -19,6 +19,14 @@ class KeyPersonsParser:
     - Insider holdings (ownership stakes, shares)
     - Holding companies and institutional investors
     """
+    
+    # Configuration constants for name validation
+    MIN_NAME_LENGTH = 5
+    MAX_NAME_LENGTH = 50
+    # Context window size for independence detection (chars before/after name)
+    INDEPENDENCE_CONTEXT_WINDOW = 50
+    # Maximum length for purpose text truncation
+    MAX_PURPOSE_LENGTH = 500
 
     def __init__(self):
         """Initialize the KeyPersonsParser with content parsers."""
@@ -193,7 +201,7 @@ class KeyPersonsParser:
                 for name in matches:
                     name_clean = name.strip()
                     # Validate name (at least 2 words, reasonable length)
-                    if len(name_clean) >= 5 and len(name_clean) <= 50:
+                    if self.MIN_NAME_LENGTH <= len(name_clean) <= self.MAX_NAME_LENGTH:
                         name_key = name_clean.lower()
                         if name_key not in seen_names:
                             seen_names.add(name_key)
@@ -241,7 +249,7 @@ class KeyPersonsParser:
                     matches = re.findall(pattern, section_text, re.IGNORECASE)
                     for name in matches:
                         name_clean = name.strip()
-                        if len(name_clean) >= 5 and len(name_clean) <= 50:
+                        if self.MIN_NAME_LENGTH <= len(name_clean) <= self.MAX_NAME_LENGTH:
                             name_key = name_clean.lower()
                             if name_key not in seen_names:
                                 seen_names.add(name_key)
@@ -250,11 +258,11 @@ class KeyPersonsParser:
                                 if is_ind_from_pattern is not None:
                                     is_independent = is_ind_from_pattern
                                 else:
-                                    # Check if "independent" appears near this director's name (within 100 chars)
+                                    # Check if "independent" appears near this director's name
                                     name_pos = section_text.lower().find(name_clean.lower())
                                     if name_pos >= 0:
-                                        context_start = max(0, name_pos - 50)
-                                        context_end = min(len(section_text), name_pos + len(name_clean) + 50)
+                                        context_start = max(0, name_pos - self.INDEPENDENCE_CONTEXT_WINDOW)
+                                        context_end = min(len(section_text), name_pos + len(name_clean) + self.INDEPENDENCE_CONTEXT_WINDOW)
                                         context = section_text[context_start:context_end].lower()
                                         is_independent = 'independent' in context
                                     else:
@@ -430,7 +438,7 @@ class KeyPersonsParser:
                         'shares_owned': shares_owned,
                         'is_activist': is_activist,
                         'activist_intent': activist_intent if is_activist else None,
-                        'purpose': purpose[:500] if purpose else None,
+                        'purpose': purpose[:self.MAX_PURPOSE_LENGTH] if purpose else None,
                         'form_type': form_type,
                         'filing_type': 'Activist (13D)' if is_activist else 'Passive (13G)',
                         'latest_filing_date': filing_date
