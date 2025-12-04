@@ -6,8 +6,7 @@ insider holdings, and major shareholders/holding companies.
 import logging
 import re
 from typing import Dict, List, Any, Optional
-from datetime import datetime, timedelta
-from collections import defaultdict
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -229,14 +228,16 @@ class KeyPersonsParser:
                 
                 # Pattern for director names with independence indicators
                 director_patterns = [
-                    # Name followed by independent indicator
-                    r'([A-Z][a-z]+(?:\s+[A-Z]\.?\s*)?[A-Z][a-z]+)\s*[,\s]+(?:independent\s+)?director',
-                    # Name with committee mentions
-                    r'([A-Z][a-z]+(?:\s+[A-Z]\.?\s*)?[A-Z][a-z]+)\s*[,\s]+(?:audit|compensation|nominating)\s+committee',
+                    # Name followed by independent indicator - captures independence status per director
+                    (r'([A-Z][a-z]+(?:\s+[A-Z]\.?\s*)?[A-Z][a-z]+)\s*[,\s]+independent\s+director', True),
+                    # Name as director (no independent qualifier)
+                    (r'([A-Z][a-z]+(?:\s+[A-Z]\.?\s*)?[A-Z][a-z]+)\s*[,\s]+director', None),
+                    # Name with committee mentions (committee membership often implies independence)
+                    (r'([A-Z][a-z]+(?:\s+[A-Z]\.?\s*)?[A-Z][a-z]+)\s*[,\s]+(?:audit|compensation|nominating)\s+committee', None),
                 ]
 
                 seen_names = set()
-                for pattern in director_patterns:
+                for pattern, is_ind_from_pattern in director_patterns:
                     matches = re.findall(pattern, section_text, re.IGNORECASE)
                     for name in matches:
                         name_clean = name.strip()
@@ -244,8 +245,21 @@ class KeyPersonsParser:
                             name_key = name_clean.lower()
                             if name_key not in seen_names:
                                 seen_names.add(name_key)
-                                # Check if independent
-                                is_independent = 'independent' in section_text.lower()
+                                # Check independence: use pattern-derived status if available,
+                                # otherwise look for "independent" near the specific name
+                                if is_ind_from_pattern is not None:
+                                    is_independent = is_ind_from_pattern
+                                else:
+                                    # Check if "independent" appears near this director's name (within 100 chars)
+                                    name_pos = section_text.lower().find(name_clean.lower())
+                                    if name_pos >= 0:
+                                        context_start = max(0, name_pos - 50)
+                                        context_end = min(len(section_text), name_pos + len(name_clean) + 50)
+                                        context = section_text[context_start:context_end].lower()
+                                        is_independent = 'independent' in context
+                                    else:
+                                        is_independent = None  # Unknown
+                                
                                 board_members.append({
                                     'name': name_clean,
                                     'role': 'Director',

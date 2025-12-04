@@ -1717,10 +1717,11 @@ class ProfileVisualizationWindow(QDialog):
                 
                 filing_type = holder.get('filing_type', 'Unknown')
                 type_item = QTableWidgetItem(filing_type)
+                # Color coding: Activist (red/warning) indicates potential pressure,
+                # Passive (neutral white) indicates standard institutional holding
                 if 'Activist' in filing_type:
-                    type_item.setForeground(QColor("#ff6666"))
-                else:
-                    type_item.setForeground(QColor("#00ff00"))
+                    type_item.setForeground(QColor("#ff6666"))  # Red for activist (attention required)
+                # Leave passive investors with default color (neutral) rather than green
                 holders_table.setItem(i, 3, type_item)
                 
                 intent = holder.get('activist_intent', '') if holder.get('is_activist') else 'Passive Investment'
