@@ -265,6 +265,12 @@ class ProfileVisualizationWindow(QDialog):
         self.tabs.addTab(self.create_growth_tab(), "Growth Analysis")
         self.tabs.addTab(self.create_health_tab(), "Health Indicators")
         
+        # Add Key Persons tab if data exists
+        key_persons = self.profile.get('key_persons', {})
+        if key_persons and (key_persons.get('executives') or key_persons.get('board_members') 
+                            or key_persons.get('insider_holdings') or key_persons.get('holding_companies')):
+            self.tabs.addTab(self.create_key_persons_tab(), "Key Persons")
+        
         # Add AI Analysis tab if analysis exists
         if self.ai_analysis:
             self.tabs.addTab(self.create_ai_analysis_tab(), "AI/ML Analysis")
@@ -1511,6 +1517,233 @@ class ProfileVisualizationWindow(QDialog):
         instruction_label.setStyleSheet("color: #4da6ff; font-size: 10px; padding: 5px; font-style: italic;")
         layout.addWidget(instruction_label)
 
+        return tab
+    
+    def create_key_persons_tab(self) -> QWidget:
+        """Create Key Persons tab showing executives, board, insiders, and holding companies."""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        content = QWidget()
+        content_layout = QVBoxLayout(content)
+        
+        key_persons = self.profile.get('key_persons', {})
+        summary = key_persons.get('summary', {})
+        
+        # Summary Section
+        summary_group = QGroupBox("👥 Key Persons Summary")
+        summary_layout = QGridLayout(summary_group)
+        
+        row = 0
+        # CEO
+        ceo_info = summary.get('ceo', {})
+        self._add_info_row(summary_layout, row, "CEO:", 
+                          ceo_info.get('name', 'Not identified') if ceo_info.get('identified') else 'Not identified')
+        row += 1
+        
+        # CFO
+        cfo_info = summary.get('cfo', {})
+        self._add_info_row(summary_layout, row, "CFO:", 
+                          cfo_info.get('name', 'Not identified') if cfo_info.get('identified') else 'Not identified')
+        row += 1
+        
+        # Chairman
+        chairman_info = summary.get('chairman', {})
+        self._add_info_row(summary_layout, row, "Chairman:", 
+                          chairman_info.get('name', 'Not identified') if chairman_info.get('identified') else 'Not identified')
+        row += 1
+        
+        # Counts
+        self._add_info_row(summary_layout, row, "Total Executives:", str(summary.get('executive_count', 0)))
+        row += 1
+        self._add_info_row(summary_layout, row, "Board Members:", str(summary.get('board_member_count', 0)))
+        row += 1
+        
+        # Board Independence
+        board_ind = summary.get('board_independence', {})
+        if board_ind.get('total_directors'):
+            ind_text = f"{board_ind.get('independent_directors', 0)} of {board_ind.get('total_directors', 0)} ({(board_ind.get('independence_ratio', 0) * 100):.0f}%)"
+            self._add_info_row(summary_layout, row, "Board Independence:", ind_text)
+            row += 1
+        
+        # Insider Holdings Summary
+        insider_sum = summary.get('insider_holdings', {})
+        if insider_sum.get('count', 0) > 0:
+            insider_text = f"{insider_sum.get('count', 0)} insiders, {insider_sum.get('net_activity', 'Neutral')}"
+            self._add_info_row(summary_layout, row, "Insider Activity:", insider_text)
+            row += 1
+        
+        # Institutional Summary
+        inst_sum = summary.get('institutional_ownership', {})
+        if inst_sum.get('holder_count', 0) > 0:
+            inst_text = f"{inst_sum.get('holder_count', 0)} holders ({inst_sum.get('total_ownership_percent', 0):.1f}%)"
+            if inst_sum.get('activist_count', 0) > 0:
+                inst_text += f", {inst_sum.get('activist_count', 0)} activist(s)"
+            self._add_info_row(summary_layout, row, "Institutional Ownership:", inst_text)
+            row += 1
+        
+        content_layout.addWidget(summary_group)
+        
+        # Executives Table
+        executives = key_persons.get('executives', [])
+        if executives:
+            exec_group = QGroupBox(f"👔 Key Executives ({len(executives)})")
+            exec_layout = QVBoxLayout(exec_group)
+            
+            exec_table = QTableWidget()
+            exec_table.setColumnCount(3)
+            exec_table.setHorizontalHeaderLabels(["Name", "Title", "Filing Date"])
+            exec_table.setRowCount(len(executives))
+            exec_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+            exec_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+            exec_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
+            
+            for i, exec_info in enumerate(executives):
+                exec_table.setItem(i, 0, QTableWidgetItem(exec_info.get('name', 'Unknown')))
+                exec_table.setItem(i, 1, QTableWidgetItem(exec_info.get('title', 'Unknown')))
+                exec_table.setItem(i, 2, QTableWidgetItem(exec_info.get('filing_date', 'N/A')))
+            
+            exec_table.setMinimumHeight(min(200, 50 + len(executives) * 30))
+            exec_layout.addWidget(exec_table)
+            content_layout.addWidget(exec_group)
+        
+        # Board Members Table
+        board_members = key_persons.get('board_members', [])
+        # Filter out the summary entry
+        actual_directors = [b for b in board_members if b.get('role') != 'Board Statistics']
+        if actual_directors:
+            board_group = QGroupBox(f"📋 Board of Directors ({len(actual_directors)})")
+            board_layout = QVBoxLayout(board_group)
+            
+            board_table = QTableWidget()
+            board_table.setColumnCount(4)
+            board_table.setHorizontalHeaderLabels(["Name", "Role", "Independent", "Filing Date"])
+            board_table.setRowCount(len(actual_directors))
+            board_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+            board_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+            board_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
+            board_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
+            
+            for i, director in enumerate(actual_directors):
+                board_table.setItem(i, 0, QTableWidgetItem(director.get('name', 'Unknown')))
+                board_table.setItem(i, 1, QTableWidgetItem(director.get('role', 'Director')))
+                is_ind = "Yes" if director.get('is_independent') else "No" if director.get('is_independent') is False else "Unknown"
+                ind_item = QTableWidgetItem(is_ind)
+                if is_ind == "Yes":
+                    ind_item.setForeground(QColor("#00ff00"))
+                elif is_ind == "No":
+                    ind_item.setForeground(QColor("#ff6666"))
+                board_table.setItem(i, 2, ind_item)
+                board_table.setItem(i, 3, QTableWidgetItem(director.get('filing_date', 'N/A')))
+            
+            board_table.setMinimumHeight(min(200, 50 + len(actual_directors) * 30))
+            board_layout.addWidget(board_table)
+            content_layout.addWidget(board_group)
+        
+        # Insider Holdings Table
+        insider_holdings = key_persons.get('insider_holdings', [])
+        if insider_holdings:
+            insider_group = QGroupBox(f"💼 Insider Holdings ({len(insider_holdings)})")
+            insider_layout = QVBoxLayout(insider_group)
+            
+            insider_table = QTableWidget()
+            insider_table.setColumnCount(6)
+            insider_table.setHorizontalHeaderLabels(["Name", "Title", "Shares Owned", "Net Buy $", "Net Sell $", "Signal"])
+            insider_table.setRowCount(len(insider_holdings))
+            insider_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+            insider_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+            insider_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
+            insider_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
+            insider_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeToContents)
+            insider_table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeToContents)
+            
+            for i, insider in enumerate(insider_holdings):
+                insider_table.setItem(i, 0, QTableWidgetItem(insider.get('name', 'Unknown')))
+                insider_table.setItem(i, 1, QTableWidgetItem(insider.get('title', 'Unknown')))
+                
+                shares = insider.get('shares_owned', 0)
+                shares_str = f"{shares:,}" if shares else "N/A"
+                insider_table.setItem(i, 2, QTableWidgetItem(shares_str))
+                
+                buy_val = insider.get('net_buy_value', 0)
+                buy_str = f"${buy_val:,.0f}" if buy_val else "-"
+                insider_table.setItem(i, 3, QTableWidgetItem(buy_str))
+                
+                sell_val = insider.get('net_sell_value', 0)
+                sell_str = f"${sell_val:,.0f}" if sell_val else "-"
+                insider_table.setItem(i, 4, QTableWidgetItem(sell_str))
+                
+                signal = insider.get('signal', 'Neutral')
+                signal_item = QTableWidgetItem(signal)
+                if 'Bullish' in signal:
+                    signal_item.setForeground(QColor("#00ff00"))
+                elif 'Bearish' in signal:
+                    signal_item.setForeground(QColor("#ff6666"))
+                insider_table.setItem(i, 5, signal_item)
+            
+            insider_table.setMinimumHeight(min(250, 50 + len(insider_holdings) * 30))
+            insider_layout.addWidget(insider_table)
+            content_layout.addWidget(insider_group)
+        
+        # Holding Companies Table
+        holding_companies = key_persons.get('holding_companies', [])
+        if holding_companies:
+            holders_group = QGroupBox(f"🏛️ Institutional Shareholders & Holding Companies ({len(holding_companies)})")
+            holders_layout = QVBoxLayout(holders_group)
+            
+            holders_table = QTableWidget()
+            holders_table.setColumnCount(5)
+            holders_table.setHorizontalHeaderLabels(["Investor/Company", "Ownership %", "Shares", "Type", "Intent/Status"])
+            holders_table.setRowCount(len(holding_companies))
+            holders_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+            holders_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+            holders_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
+            holders_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
+            holders_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeToContents)
+            
+            for i, holder in enumerate(holding_companies):
+                name_item = QTableWidgetItem(holder.get('name', 'Unknown'))
+                holders_table.setItem(i, 0, name_item)
+                
+                ownership = holder.get('ownership_percent', 0)
+                ownership_str = f"{ownership:.2f}%" if ownership else "N/A"
+                holders_table.setItem(i, 1, QTableWidgetItem(ownership_str))
+                
+                shares = holder.get('shares_owned', 0)
+                shares_str = f"{shares:,}" if shares else "N/A"
+                holders_table.setItem(i, 2, QTableWidgetItem(shares_str))
+                
+                filing_type = holder.get('filing_type', 'Unknown')
+                type_item = QTableWidgetItem(filing_type)
+                if 'Activist' in filing_type:
+                    type_item.setForeground(QColor("#ff6666"))
+                else:
+                    type_item.setForeground(QColor("#00ff00"))
+                holders_table.setItem(i, 3, type_item)
+                
+                intent = holder.get('activist_intent', '') if holder.get('is_activist') else 'Passive Investment'
+                holders_table.setItem(i, 4, QTableWidgetItem(intent))
+            
+            holders_table.setMinimumHeight(min(250, 50 + len(holding_companies) * 30))
+            holders_layout.addWidget(holders_table)
+            content_layout.addWidget(holders_group)
+        
+        # If no data, show message
+        if not executives and not actual_directors and not insider_holdings and not holding_companies:
+            no_data = QLabel("No key persons data available. This may be because:\n"
+                            "• The company has limited SEC filings\n"
+                            "• DEF 14A, Form 4, or SC 13D/G filings were not found\n"
+                            "• Content parsing encountered issues")
+            no_data.setStyleSheet("color: #888; padding: 20px; font-style: italic;")
+            no_data.setWordWrap(True)
+            content_layout.addWidget(no_data)
+        
+        content_layout.addStretch()
+        scroll.setWidget(content)
+        layout.addWidget(scroll)
+        
         return tab
     
     def create_ai_analysis_tab(self) -> QWidget:

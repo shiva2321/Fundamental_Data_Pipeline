@@ -18,9 +18,10 @@ This document explains **what** each data point is, **how** it's calculated, **w
 8. [Insider Trading (Form 4)](#insider-trading-form-4)
 9. [Institutional Ownership (SC 13D/G)](#institutional-ownership-sc-13dg)
 10. [Corporate Governance (DEF 14A)](#corporate-governance-def-14a)
-11. [AI Analysis](#ai-analysis)
-12. [Statistical Summary](#statistical-summary)
-13. [Volatility Metrics](#volatility-metrics)
+11. [Key Persons](#key-persons)
+12. [AI Analysis](#ai-analysis)
+13. [Statistical Summary](#statistical-summary)
+14. [Volatility Metrics](#volatility-metrics)
 
 ---
 
@@ -42,6 +43,7 @@ Every company profile stored in MongoDB contains these main sections:
     "insider_trading": {...},                # Form 4 analysis
     "institutional_ownership": {...},        # SC 13D/G analysis
     "corporate_governance": {...},           # DEF 14A analysis
+    "key_persons": {...},                    # Executives, Board, Insiders, Holdings
     "ai_analysis": {...},                    # AI insights
     "statistical_summary": {...},            # Stats
     "volatility_metrics": {...},             # Volatility
@@ -1468,6 +1470,270 @@ Interpretation: 4x more buying (very bullish)
 - **< 50% independent**: Controlled by management/founders
 - **CEO is chairman**: Concentrates power
 - **Family members on board**: Potential conflicts
+
+---
+
+## Key Persons
+
+### `key_persons`
+
+**Purpose**: Comprehensive extraction of key company personnel, including executives, board members, insider holdings, and major shareholders  
+**Source**: DEF 14A, Form 4, SC 13D/G filings  
+**Why Important**: Understanding who runs and owns a company is essential for assessing management quality, alignment with shareholders, and potential risks or opportunities
+
+```python
+{
+    "executives": [                          # Key executives list
+        {
+            "name": "John Smith",
+            "title": "CEO",
+            "source": "DEF 14A",
+            "filing_date": "2024-04-15"
+        },
+        {
+            "name": "Jane Doe",
+            "title": "CFO",
+            "source": "DEF 14A",
+            "filing_date": "2024-04-15"
+        }
+    ],
+    "board_members": [                       # Board of directors
+        {
+            "name": "Robert Johnson",
+            "role": "Director",
+            "is_independent": True,
+            "source": "DEF 14A",
+            "filing_date": "2024-04-15"
+        },
+        {
+            "name": "Board Summary",          # Board statistics
+            "role": "Board Statistics",
+            "total_directors": 12,
+            "independent_directors": 10,
+            "independence_ratio": 0.83
+        }
+    ],
+    "insider_holdings": [                    # Insider ownership
+        {
+            "name": "John Smith",
+            "title": "CEO",
+            "shares_owned": 2500000,
+            "latest_filing_date": "2024-11-15",
+            "net_buy_value": 5000000.0,
+            "net_sell_value": 1200000.0,
+            "net_shares": 15000,
+            "transaction_count": 5,
+            "signal": "Bullish"
+        }
+    ],
+    "holding_companies": [                   # Major institutional shareholders
+        {
+            "name": "Vanguard Group",
+            "ownership_percent": 8.2,
+            "shares_owned": 45000000,
+            "is_activist": False,
+            "form_type": "SC 13G",
+            "filing_type": "Passive (13G)",
+            "latest_filing_date": "2024-02-14"
+        },
+        {
+            "name": "Activist Fund XYZ",
+            "ownership_percent": 5.8,
+            "shares_owned": 32000000,
+            "is_activist": True,
+            "activist_intent": "Board/Governance Changes",
+            "purpose": "Seeking board representation...",
+            "form_type": "SC 13D",
+            "filing_type": "Activist (13D)",
+            "latest_filing_date": "2024-11-15"
+        }
+    ],
+    "summary": {                             # Aggregated summary
+        "ceo": {
+            "name": "John Smith",
+            "identified": True
+        },
+        "cfo": {
+            "name": "Jane Doe",
+            "identified": True
+        },
+        "chairman": {
+            "name": "Not identified",
+            "identified": False
+        },
+        "executive_count": 5,
+        "board_member_count": 12,
+        "board_independence": {
+            "total_directors": 12,
+            "independent_directors": 10,
+            "independence_ratio": 0.83
+        },
+        "insider_holdings": {
+            "count": 8,
+            "total_shares": 15000000,
+            "total_buy_value": 25000000.0,
+            "total_sell_value": 5000000.0,
+            "net_activity": "Buying"
+        },
+        "institutional_ownership": {
+            "holder_count": 5,
+            "total_ownership_percent": 28.5,
+            "activist_count": 1,
+            "largest_holder": "Vanguard Group",
+            "largest_stake": 8.2
+        }
+    },
+    "generated_at": "2024-12-04T10:30:00"
+}
+```
+
+### Key Persons Fields:
+
+#### **executives**
+
+**What**: List of key company executives (CEO, CFO, COO, CTO, etc.)  
+**Source**: Parsed from DEF 14A proxy statements  
+**Fields**:
+- `name`: Full name of the executive
+- `title`: Position (CEO, CFO, COO, CTO, President, Chairman, General Counsel)
+- `source`: Filing type where identified
+- `filing_date`: Date of the filing
+
+**Why Important**:
+- Identify who runs the company
+- Track management changes
+- Assess executive experience and background
+
+---
+
+#### **board_members**
+
+**What**: List of board directors with independence status  
+**Source**: Parsed from DEF 14A proxy statements  
+**Fields**:
+- `name`: Director name
+- `role`: "Director" or "Board Statistics" (for summary)
+- `is_independent`: Boolean indicating independence
+- `total_directors`: Total board size (in summary)
+- `independent_directors`: Count of independent directors
+- `independence_ratio`: Percentage of independent directors
+
+**Why Important**:
+- Board oversight quality
+- Governance practices
+- Shareholder protection
+
+**Best Practices**:
+- **> 75% independent**: Excellent governance
+- **50-75%**: Adequate
+- **< 50%**: Red flag - management controlled
+
+---
+
+#### **insider_holdings**
+
+**What**: Detailed insider ownership and trading activity  
+**Source**: Parsed from Form 4 filings  
+**Fields**:
+- `name`: Insider name
+- `title`: Position (CEO, CFO, Director, 10% Owner, etc.)
+- `shares_owned`: Number of shares currently owned
+- `latest_filing_date`: Most recent Form 4 filing date
+- `net_buy_value`: Total value of purchases
+- `net_sell_value`: Total value of sales
+- `net_shares`: Net shares bought (positive) or sold (negative)
+- `transaction_count`: Number of transactions
+- `signal`: Trading signal (Strong Bullish, Bullish, Neutral, Bearish, Strong Bearish)
+
+**Why Important**:
+- Insider confidence indicator
+- Skin in the game
+- Early warning signals
+
+**Interpretation**:
+- **High ownership + buying**: Strong confidence
+- **Heavy selling by multiple insiders**: Potential red flag
+- **CEO/CFO buying**: Very significant
+- **Option exercises**: Often followed by sales (less meaningful)
+
+---
+
+#### **holding_companies**
+
+**What**: Major institutional shareholders and their stakes  
+**Source**: Parsed from SC 13D/G filings  
+**Fields**:
+- `name`: Investor/institution name
+- `ownership_percent`: Percentage of company owned
+- `shares_owned`: Number of shares owned
+- `is_activist`: Boolean indicating activist investor
+- `activist_intent`: Purpose of activism (if applicable)
+- `purpose`: Full purpose statement excerpt
+- `form_type`: SC 13D (activist) or SC 13G (passive)
+- `filing_type`: "Activist (13D)" or "Passive (13G)"
+- `latest_filing_date`: Most recent filing date
+
+**Why Important**:
+- Institutional endorsement
+- Activist pressure identification
+- Ownership concentration
+
+**Activist Intent Categories**:
+- **Board/Governance Changes**: Seeking board seats or management changes
+- **Strategic Alternatives**: Pushing for sale, merger, or spin-off
+- **Acquisition Intent**: Building position for takeover
+- **Investment Only**: Passive despite 13D filing
+
+---
+
+#### **summary**
+
+**What**: Aggregated summary of all key persons data  
+**Purpose**: Quick overview for analysis and AI
+
+**Fields**:
+- `ceo`: CEO identification (name, identified boolean)
+- `cfo`: CFO identification
+- `chairman`: Chairman identification
+- `executive_count`: Total executives identified
+- `board_member_count`: Total board members
+- `board_independence`: Board independence metrics
+- `insider_holdings`: Insider ownership summary
+  - `count`: Number of insiders tracked
+  - `total_shares`: Total shares held by insiders
+  - `total_buy_value`: Total insider buying
+  - `total_sell_value`: Total insider selling
+  - `net_activity`: "Buying" or "Selling" or "Neutral"
+- `institutional_ownership`: Institutional ownership summary
+  - `holder_count`: Number of major holders
+  - `total_ownership_percent`: Combined ownership
+  - `activist_count`: Number of activist investors
+  - `largest_holder`: Name of largest shareholder
+  - `largest_stake`: Largest ownership percentage
+
+---
+
+### Key Persons Use Cases:
+
+1. **Management Assessment**
+   - Who is the CEO/CFO?
+   - Are key executives buying or selling?
+   - Is there high management turnover?
+
+2. **Governance Analysis**
+   - Is the board independent?
+   - Are there activist investors?
+   - What is ownership concentration?
+
+3. **Investment Signals**
+   - Insider buying = confidence
+   - Activist involvement = potential catalyst
+   - High institutional ownership = validation
+
+4. **Risk Detection**
+   - Mass insider selling
+   - Activist campaigns
+   - Board independence issues
 
 ---
 

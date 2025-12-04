@@ -182,6 +182,7 @@ Fundamental_Data_Pipeline/
 │   ├── form4_parser.py            # Insider trading (Form 4)
 │   ├── sc13_parser.py             # Institutional ownership (SC 13D/G)
 │   ├── def14a_parser.py           # Corporate governance (DEF 14A)
+│   ├── key_persons_parser.py      # Key persons extraction (executives, board, insiders, holdings)
 │   └── filing_content_parser.py   # Content fetching & parsing
 │
 ├── UI Components:
@@ -271,6 +272,13 @@ Fundamental_Data_Pipeline/
 - Board size and composition
 - Number of independent directors
 - Independence ratio
+
+### Key Persons (Consolidated View):
+- **Executives**: CEO, CFO, COO, CTO, and other key officers with titles
+- **Board Members**: Directors with independence status
+- **Insider Holdings**: Individual insider ownership with shares and transaction signals
+- **Holding Companies**: Major institutional shareholders with ownership percentages and stakes
+- **Activist Investors**: Identified activists with their stated intentions
 
 ---
 
