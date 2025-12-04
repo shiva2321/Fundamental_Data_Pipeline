@@ -42,17 +42,17 @@ class KeyPersonsParser:
             self.parsers_available = False
 
     def parse_key_persons(self, filings: List[Dict[str, Any]], cik: str, 
-                          max_form4: int = 50, max_def14a: int = 3, 
-                          max_sc13: int = 15) -> Dict[str, Any]:
+                          max_form4: int = 100, max_def14a: int = 10,
+                          max_sc13: int = 50) -> Dict[str, Any]:
         """
         Parse all filings to extract comprehensive key persons data.
 
         Args:
             filings: List of all filings
             cik: Company CIK
-            max_form4: Maximum Form 4 filings to parse for insider data
-            max_def14a: Maximum DEF 14A filings to parse for executive/board data
-            max_sc13: Maximum SC 13D/G filings to parse for institutional data
+            max_form4: Maximum Form 4 filings to parse for insider data (increased to 100)
+            max_def14a: Maximum DEF 14A filings to parse for executive/board data (increased to 10)
+            max_sc13: Maximum SC 13D/G filings to parse for institutional data (increased to 50)
 
         Returns:
             Dictionary with key persons data including:
@@ -74,23 +74,16 @@ class KeyPersonsParser:
             result['error'] = 'Content parsers not available'
             return result
 
-        # Extract executives and board members from DEF 14A
-        try:
-            exec_board_data = self._extract_executives_and_board(filings, cik, max_def14a)
-            result['executives'] = exec_board_data.get('executives', [])
-            result['board_members'] = exec_board_data.get('board_members', [])
-        except Exception as e:
-            logger.warning(f"Error extracting executives/board: {e}")
-            result['executives'] = []
-            result['board_members'] = []
-
-        # Extract insider holdings from Form 4
+        # Extract insider holdings from Form 4 FIRST (most reliable source of names)
         try:
             insider_data = self._extract_insider_holdings(filings, cik, max_form4)
             result['insider_holdings'] = insider_data.get('holdings', [])
         except Exception as e:
             logger.warning(f"Error extracting insider holdings: {e}")
             result['insider_holdings'] = []
+
+        # Extract executives from insider data (Form 4 has clean names and titles)
+        result['executives'] = self._extract_executives_from_insiders(result['insider_holdings'])
 
         # Extract holding companies from SC 13D/G
         try:
@@ -100,33 +93,97 @@ class KeyPersonsParser:
             logger.warning(f"Error extracting holding companies: {e}")
             result['holding_companies'] = []
 
+        # Extract board data from DEF 14A using content parser
+        try:
+            board_data = self._extract_board_from_def14a(filings, cik, max_def14a)
+            result['board_members'] = board_data.get('board_members', [])
+        except Exception as e:
+            logger.warning(f"Error extracting board: {e}")
+            result['board_members'] = []
+
         # Generate summary
         result['summary'] = self._generate_summary(result)
 
         return result
 
-    def _extract_executives_and_board(self, filings: List[Dict[str, Any]], 
-                                       cik: str, max_filings: int) -> Dict[str, Any]:
+    def _extract_executives_from_insiders(self, insider_holdings: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
-        Extract executives and board members from DEF 14A filings.
-        
+        Extract executives from insider holdings data (Form 4 has clean names and titles).
+
         Returns:
-            Dictionary with executives and board_members lists
+            List of executives with proper names and titles
+        """
+        executives = []
+        seen_names = set()
+
+        # Executive title keywords to identify key executives
+        exec_keywords = ['ceo', 'cfo', 'coo', 'cto', 'president', 'chairman', 'chief', 'executive officer', 'financial officer', 'operating officer']
+
+        for holding in insider_holdings:
+            name = holding.get('name', '').strip()
+            title = holding.get('title', '').lower()
+
+            # Skip if name is invalid or already seen
+            if not name or name.lower() in ['unknown', 'not applicable', 'n/a']:
+                continue
+            if name.lower() in seen_names:
+                continue
+
+            # Check if title indicates this is an executive
+            is_executive = any(keyword in title for keyword in exec_keywords)
+
+            if is_executive:
+                # Determine primary executive title
+                exec_title = 'Executive'
+                if 'ceo' in title or 'chief executive officer' in title:
+                    exec_title = 'CEO'
+                elif 'cfo' in title or 'chief financial officer' in title:
+                    exec_title = 'CFO'
+                elif 'coo' in title or 'chief operating officer' in title:
+                    exec_title = 'COO'
+                elif 'cto' in title or 'chief technology officer' in title:
+                    exec_title = 'CTO'
+                elif 'president' in title:
+                    exec_title = 'President'
+                elif 'chairman' in title:
+                    exec_title = 'Chairman'
+                elif 'general counsel' in title or 'chief legal' in title:
+                    exec_title = 'General Counsel'
+
+                seen_names.add(name.lower())
+                executives.append({
+                    'name': name,
+                    'title': exec_title,
+                    'full_title': holding.get('title', ''),
+                    'source': 'Form 4',
+                    'filing_date': holding.get('latest_filing_date', '')
+                })
+
+        # Sort by title importance
+        title_priority = {'CEO': 0, 'President': 1, 'Chairman': 2, 'CFO': 3, 'COO': 4, 'CTO': 5, 'General Counsel': 6, 'Executive': 99}
+        executives.sort(key=lambda x: title_priority.get(x['title'], 99))
+
+        return executives
+
+    def _extract_board_from_def14a(self, filings: List[Dict[str, Any]],
+                                    cik: str, max_filings: int) -> Dict[str, Any]:
+        """
+        Extract board composition from DEF 14A using the content parser.
+
+        Returns:
+            Dictionary with board_members list
         """
         def14a_filings = [f for f in filings if f.get('form') in ['DEF 14A', 'DEFC14A', 'DEFA14A']]
         
         if not def14a_filings:
-            return {'executives': [], 'board_members': []}
+            return {'board_members': []}
 
         # Sort by date, most recent first
         sorted_filings = sorted(def14a_filings, key=lambda x: x.get('filingDate', ''), reverse=True)
 
-        executives = []
         board_members = []
-        seen_executives = set()
-        seen_directors = set()
 
-        logger.info(f"Parsing {min(max_filings, len(sorted_filings))} DEF 14A filings for executives/board")
+        logger.info(f"Parsing {min(max_filings, len(sorted_filings))} DEF 14A filings for board composition")
 
         for filing in sorted_filings[:max_filings]:
             accession = filing.get('accessionNumber')
@@ -135,169 +192,33 @@ class KeyPersonsParser:
             if not accession:
                 continue
 
-            # Fetch and parse the DEF 14A content
-            content = self.fetcher.fetch_filing_content(cik, accession)
-            if not content:
+            # Use the DEF14A content parser to get board composition
+            try:
+                parsed = self.def14a_parser.parse_def14a_content(cik, accession)
+
+                if parsed.get('available'):
+                    board_comp = parsed.get('board_composition', {})
+
+                    total = board_comp.get('total_directors', 0)
+                    independent = board_comp.get('independent_directors', 0)
+                    ratio = board_comp.get('independence_ratio', 0)
+
+                    if total > 0:
+                        board_members.append({
+                            'name': 'Board Summary',
+                            'role': 'Board Statistics',
+                            'total_directors': total,
+                            'independent_directors': independent,
+                            'independence_ratio': round(ratio, 2),
+                            'source': 'DEF 14A',
+                            'filing_date': filing_date
+                        })
+                        break  # Only need one good summary
+            except Exception as e:
+                logger.debug(f"Error parsing DEF 14A {accession}: {e}")
                 continue
 
-            # Parse executives from content
-            file_executives = self._parse_executives_from_content(content, filing_date)
-            for exec_info in file_executives:
-                exec_key = exec_info.get('name', '').lower().strip()
-                if exec_key and exec_key not in seen_executives:
-                    seen_executives.add(exec_key)
-                    executives.append(exec_info)
-
-            # Parse board members from content
-            file_directors = self._parse_board_from_content(content, filing_date)
-            for director_info in file_directors:
-                dir_key = director_info.get('name', '').lower().strip()
-                if dir_key and dir_key not in seen_directors:
-                    seen_directors.add(dir_key)
-                    board_members.append(director_info)
-
-        return {
-            'executives': executives,
-            'board_members': board_members
-        }
-
-    def _parse_executives_from_content(self, content: str, filing_date: str) -> List[Dict[str, Any]]:
-        """Parse executive names and titles from DEF 14A content."""
-        from bs4 import BeautifulSoup
-        
-        executives = []
-        
-        try:
-            soup = BeautifulSoup(content, 'html.parser')
-            text = soup.get_text()
-
-            # Common executive title patterns
-            exec_patterns = [
-                # CEO patterns
-                (r'(?:chief\s+executive\s+officer|ceo)[,\s]+([A-Z][a-z]+(?:\s+[A-Z]\.?\s*)?[A-Z][a-z]+)', 'CEO'),
-                (r'([A-Z][a-z]+(?:\s+[A-Z]\.?\s*)?[A-Z][a-z]+)[,\s]+(?:chief\s+executive\s+officer|ceo)', 'CEO'),
-                # CFO patterns
-                (r'(?:chief\s+financial\s+officer|cfo)[,\s]+([A-Z][a-z]+(?:\s+[A-Z]\.?\s*)?[A-Z][a-z]+)', 'CFO'),
-                (r'([A-Z][a-z]+(?:\s+[A-Z]\.?\s*)?[A-Z][a-z]+)[,\s]+(?:chief\s+financial\s+officer|cfo)', 'CFO'),
-                # COO patterns
-                (r'(?:chief\s+operating\s+officer|coo)[,\s]+([A-Z][a-z]+(?:\s+[A-Z]\.?\s*)?[A-Z][a-z]+)', 'COO'),
-                (r'([A-Z][a-z]+(?:\s+[A-Z]\.?\s*)?[A-Z][a-z]+)[,\s]+(?:chief\s+operating\s+officer|coo)', 'COO'),
-                # CTO patterns
-                (r'(?:chief\s+technology\s+officer|cto)[,\s]+([A-Z][a-z]+(?:\s+[A-Z]\.?\s*)?[A-Z][a-z]+)', 'CTO'),
-                (r'([A-Z][a-z]+(?:\s+[A-Z]\.?\s*)?[A-Z][a-z]+)[,\s]+(?:chief\s+technology\s+officer|cto)', 'CTO'),
-                # CLO/General Counsel patterns
-                (r'(?:chief\s+legal\s+officer|general\s+counsel)[,\s]+([A-Z][a-z]+(?:\s+[A-Z]\.?\s*)?[A-Z][a-z]+)', 'General Counsel'),
-                # President patterns
-                (r'(?:president)[,\s]+([A-Z][a-z]+(?:\s+[A-Z]\.?\s*)?[A-Z][a-z]+)', 'President'),
-                (r'([A-Z][a-z]+(?:\s+[A-Z]\.?\s*)?[A-Z][a-z]+)[,\s]+(?:president)', 'President'),
-                # Chairman patterns
-                (r'(?:chairman\s+of\s+the\s+board|chairman)[,\s]+([A-Z][a-z]+(?:\s+[A-Z]\.?\s*)?[A-Z][a-z]+)', 'Chairman'),
-                (r'([A-Z][a-z]+(?:\s+[A-Z]\.?\s*)?[A-Z][a-z]+)[,\s]+(?:chairman)', 'Chairman'),
-            ]
-
-            seen_names = set()
-            for pattern, title in exec_patterns:
-                matches = re.findall(pattern, text, re.IGNORECASE)
-                for name in matches:
-                    name_clean = name.strip()
-                    # Validate name (at least 2 words, reasonable length)
-                    if self.MIN_NAME_LENGTH <= len(name_clean) <= self.MAX_NAME_LENGTH:
-                        name_key = name_clean.lower()
-                        if name_key not in seen_names:
-                            seen_names.add(name_key)
-                            executives.append({
-                                'name': name_clean,
-                                'title': title,
-                                'source': 'DEF 14A',
-                                'filing_date': filing_date
-                            })
-
-        except Exception as e:
-            logger.debug(f"Error parsing executives from content: {e}")
-
-        return executives
-
-    def _parse_board_from_content(self, content: str, filing_date: str) -> List[Dict[str, Any]]:
-        """Parse board of directors from DEF 14A content."""
-        from bs4 import BeautifulSoup
-        
-        board_members = []
-        
-        try:
-            soup = BeautifulSoup(content, 'html.parser')
-            text = soup.get_text()
-
-            # Look for director section patterns
-            director_section_pattern = r'(?:directors?|board\s+of\s+directors?)[^\n]*\n(.*?)(?:executive\s+compensation|proposal|$)'
-            section_match = re.search(director_section_pattern, text, re.IGNORECASE | re.DOTALL)
-
-            if section_match:
-                section_text = section_match.group(1)
-                
-                # Pattern for director names with independence indicators
-                director_patterns = [
-                    # Name followed by independent indicator - captures independence status per director
-                    (r'([A-Z][a-z]+(?:\s+[A-Z]\.?\s*)?[A-Z][a-z]+)\s*[,\s]+independent\s+director', True),
-                    # Name as director (no independent qualifier)
-                    (r'([A-Z][a-z]+(?:\s+[A-Z]\.?\s*)?[A-Z][a-z]+)\s*[,\s]+director', None),
-                    # Name with committee mentions (committee membership often implies independence)
-                    (r'([A-Z][a-z]+(?:\s+[A-Z]\.?\s*)?[A-Z][a-z]+)\s*[,\s]+(?:audit|compensation|nominating)\s+committee', None),
-                ]
-
-                seen_names = set()
-                for pattern, is_ind_from_pattern in director_patterns:
-                    matches = re.findall(pattern, section_text, re.IGNORECASE)
-                    for name in matches:
-                        name_clean = name.strip()
-                        if self.MIN_NAME_LENGTH <= len(name_clean) <= self.MAX_NAME_LENGTH:
-                            name_key = name_clean.lower()
-                            if name_key not in seen_names:
-                                seen_names.add(name_key)
-                                # Check independence: use pattern-derived status if available,
-                                # otherwise look for "independent" near the specific name
-                                if is_ind_from_pattern is not None:
-                                    is_independent = is_ind_from_pattern
-                                else:
-                                    # Check if "independent" appears near this director's name
-                                    name_pos = section_text.lower().find(name_clean.lower())
-                                    if name_pos >= 0:
-                                        context_start = max(0, name_pos - self.INDEPENDENCE_CONTEXT_WINDOW)
-                                        context_end = min(len(section_text), name_pos + len(name_clean) + self.INDEPENDENCE_CONTEXT_WINDOW)
-                                        context = section_text[context_start:context_end].lower()
-                                        is_independent = 'independent' in context
-                                    else:
-                                        is_independent = None  # Unknown
-                                
-                                board_members.append({
-                                    'name': name_clean,
-                                    'role': 'Director',
-                                    'is_independent': is_independent,
-                                    'source': 'DEF 14A',
-                                    'filing_date': filing_date
-                                })
-
-            # Also look for board independence statistics
-            independence_pattern = r'(\d+)\s+(?:of\s+)?(?:the\s+)?(\d+)\s+directors?\s+(?:are|is)\s+independent'
-            ind_match = re.search(independence_pattern, text, re.IGNORECASE)
-            if ind_match:
-                independent_count = int(ind_match.group(1))
-                total_count = int(ind_match.group(2))
-                # Add a summary director if no individual directors found
-                if not board_members:
-                    board_members.append({
-                        'name': 'Board Summary',
-                        'role': 'Board Statistics',
-                        'total_directors': total_count,
-                        'independent_directors': independent_count,
-                        'independence_ratio': round(independent_count / total_count, 2) if total_count > 0 else 0,
-                        'source': 'DEF 14A',
-                        'filing_date': filing_date
-                    })
-
-        except Exception as e:
-            logger.debug(f"Error parsing board from content: {e}")
-
-        return board_members
+        return {'board_members': board_members}
 
     def _extract_insider_holdings(self, filings: List[Dict[str, Any]], 
                                    cik: str, max_filings: int) -> Dict[str, Any]:
@@ -427,6 +348,14 @@ class KeyPersonsParser:
             is_activist = parsed.get('is_activist', False)
             activist_intent = parsed.get('activist_intent', '')
             purpose = parsed.get('purpose', '')
+
+            # Skip invalid entries - must have a valid name and either ownership or shares data
+            invalid_names = ['unknown investor', 'not applicable', 'not', 'n/a', 'none', 'see', 'item']
+            if (investor_name.lower() in invalid_names or
+                len(investor_name) < 3 or
+                (ownership_percent == 0 and shares_owned == 0)):
+                logger.debug(f"Skipping invalid institutional holder: {investor_name}")
+                continue
 
             if investor_name != 'Unknown Investor':
                 name_key = investor_name.lower().strip()

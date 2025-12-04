@@ -7,7 +7,7 @@ from typing import Dict, Any, Optional
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QTabWidget,
                                QWidget, QLabel, QScrollArea, QGroupBox, QPushButton,
                                QGridLayout, QTableWidget, QTableWidgetItem,
-                               QHeaderView)
+                               QHeaderView, QHBoxLayout)
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont, QColor
 
@@ -1586,46 +1586,106 @@ class ProfileVisualizationWindow(QDialog):
         
         content_layout.addWidget(summary_group)
         
-        # Executives Table
+        # Executives Table - Make Collapsible with expand/collapse button
         executives = key_persons.get('executives', [])
         if executives:
-            exec_group = QGroupBox(f"👔 Key Executives ({len(executives)})")
-            exec_layout = QVBoxLayout(exec_group)
-            
+            # Create expandable section with button
+            exec_container = QWidget()
+            exec_container_layout = QVBoxLayout(exec_container)
+            exec_container_layout.setContentsMargins(0, 0, 0, 0)
+
+            # Header with collapse button
+            exec_header = QWidget()
+            exec_header_layout = QHBoxLayout(exec_header)
+            exec_header_layout.setContentsMargins(5, 5, 5, 5)
+
+            exec_toggle_btn = QPushButton(f"▼ 👔 Key Executives ({len(executives)})")
+            exec_toggle_btn.setStyleSheet("""
+                QPushButton {
+                    text-align: left;
+                    padding: 8px;
+                    background-color: #2d2d2d;
+                    border: 1px solid #3e3e3e;
+                    font-weight: bold;
+                    font-size: 12px;
+                }
+                QPushButton:hover {
+                    background-color: #3d3d3d;
+                }
+            """)
+            exec_header_layout.addWidget(exec_toggle_btn)
+            exec_container_layout.addWidget(exec_header)
+
+            # Content widget
+            exec_content = QWidget()
+            exec_layout = QVBoxLayout(exec_content)
+
             exec_table = QTableWidget()
-            exec_table.setColumnCount(3)
-            exec_table.setHorizontalHeaderLabels(["Name", "Title", "Filing Date"])
+            exec_table.setColumnCount(4)  # Added Active column
+            exec_table.setHorizontalHeaderLabels(["Name", "Title", "Active", "Filing Date"])
             exec_table.setRowCount(len(executives))
-            exec_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
-            exec_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
-            exec_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
-            
+            # Make ALL columns resizable
+            header = exec_table.horizontalHeader()
+            for col in range(4):
+                header.setSectionResizeMode(col, QHeaderView.ResizeMode.Interactive)
+            # Set default widths
+            exec_table.setColumnWidth(0, 250)
+            exec_table.setColumnWidth(1, 200)
+            exec_table.setColumnWidth(2, 80)
+            exec_table.setColumnWidth(3, 120)
+
             for i, exec_info in enumerate(executives):
                 exec_table.setItem(i, 0, QTableWidgetItem(exec_info.get('name', 'Unknown')))
                 exec_table.setItem(i, 1, QTableWidgetItem(exec_info.get('title', 'Unknown')))
-                exec_table.setItem(i, 2, QTableWidgetItem(exec_info.get('filing_date', 'N/A')))
-            
+
+                # Check if active (filing within last 2 years)
+                filing_date = exec_info.get('filing_date', '')
+                is_active = self._is_recent_filing(filing_date, months=24)
+                active_item = QTableWidgetItem("Yes" if is_active else "No")
+                if is_active:
+                    active_item.setForeground(QColor("#00ff00"))
+                else:
+                    active_item.setForeground(QColor("#888888"))
+                exec_table.setItem(i, 2, active_item)
+                exec_table.setItem(i, 3, QTableWidgetItem(filing_date))
+
             exec_table.setMinimumHeight(min(200, 50 + len(executives) * 30))
             exec_layout.addWidget(exec_table)
-            content_layout.addWidget(exec_group)
-        
-        # Board Members Table
+            exec_container_layout.addWidget(exec_content)
+
+            # Toggle function
+            def toggle_executives():
+                is_visible = exec_content.isVisible()
+                exec_content.setVisible(not is_visible)
+                exec_toggle_btn.setText(f"{'▼' if not is_visible else '▶'} 👔 Key Executives ({len(executives)})")
+
+            exec_toggle_btn.clicked.connect(toggle_executives)
+            content_layout.addWidget(exec_container)
+
+        # Board Members Table - Make Collapsible
         board_members = key_persons.get('board_members', [])
         # Filter out the summary entry
         actual_directors = [b for b in board_members if b.get('role') != 'Board Statistics']
         if actual_directors:
             board_group = QGroupBox(f"📋 Board of Directors ({len(actual_directors)})")
+            board_group.setCheckable(True)
+            board_group.setChecked(True)  # Expanded by default
             board_layout = QVBoxLayout(board_group)
             
             board_table = QTableWidget()
             board_table.setColumnCount(4)
             board_table.setHorizontalHeaderLabels(["Name", "Role", "Independent", "Filing Date"])
             board_table.setRowCount(len(actual_directors))
-            board_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
-            board_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
-            board_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
-            board_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
-            
+            # Make ALL columns resizable
+            header = board_table.horizontalHeader()
+            for col in range(4):
+                header.setSectionResizeMode(col, QHeaderView.ResizeMode.Interactive)
+            # Set default widths
+            board_table.setColumnWidth(0, 250)
+            board_table.setColumnWidth(1, 150)
+            board_table.setColumnWidth(2, 120)
+            board_table.setColumnWidth(3, 120)
+
             for i, director in enumerate(actual_directors):
                 board_table.setItem(i, 0, QTableWidgetItem(director.get('name', 'Unknown')))
                 board_table.setItem(i, 1, QTableWidgetItem(director.get('role', 'Director')))
@@ -1651,37 +1711,52 @@ class ProfileVisualizationWindow(QDialog):
             board_layout.addWidget(board_table)
             content_layout.addWidget(board_group)
         
-        # Insider Holdings Table
+        # Insider Holdings Table - Make Collapsible
         insider_holdings = key_persons.get('insider_holdings', [])
         if insider_holdings:
             insider_group = QGroupBox(f"💼 Insider Holdings ({len(insider_holdings)})")
+            insider_group.setCheckable(True)
+            insider_group.setChecked(True)  # Expanded by default
             insider_layout = QVBoxLayout(insider_group)
             
             insider_table = QTableWidget()
             insider_table.setColumnCount(6)
             insider_table.setHorizontalHeaderLabels(["Name", "Title", "Shares Owned", "Net Buy $", "Net Sell $", "Signal"])
             insider_table.setRowCount(len(insider_holdings))
-            insider_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
-            insider_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
-            insider_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
-            insider_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
-            insider_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeToContents)
-            insider_table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeToContents)
-            
+            # Make ALL columns resizable
+            header = insider_table.horizontalHeader()
+            for col in range(6):
+                header.setSectionResizeMode(col, QHeaderView.ResizeMode.Interactive)
+            # Set default widths
+            insider_table.setColumnWidth(0, 200)
+            insider_table.setColumnWidth(1, 150)
+            insider_table.setColumnWidth(2, 120)
+            insider_table.setColumnWidth(3, 120)
+            insider_table.setColumnWidth(4, 120)
+            insider_table.setColumnWidth(5, 120)
+
             for i, insider in enumerate(insider_holdings):
                 insider_table.setItem(i, 0, QTableWidgetItem(insider.get('name', 'Unknown')))
                 insider_table.setItem(i, 1, QTableWidgetItem(insider.get('title', 'Unknown')))
                 
                 shares = insider.get('shares_owned', 0)
-                shares_str = f"{shares:,}" if shares else "N/A"
+                shares_str = f"{shares:,}" if shares else "-"
                 insider_table.setItem(i, 2, QTableWidgetItem(shares_str))
                 
+                # Fix: Check if value exists and is > 0 explicitly
                 buy_val = insider.get('net_buy_value', 0)
-                buy_str = f"${buy_val:,.0f}" if buy_val else "-"
+                if buy_val is not None and buy_val > 0:
+                    buy_str = f"${buy_val:,.0f}"
+                else:
+                    buy_str = "-"
                 insider_table.setItem(i, 3, QTableWidgetItem(buy_str))
                 
+                # Fix: Check if value exists and is > 0 explicitly
                 sell_val = insider.get('net_sell_value', 0)
-                sell_str = f"${sell_val:,.0f}" if sell_val else "-"
+                if sell_val is not None and sell_val > 0:
+                    sell_str = f"${sell_val:,.0f}"
+                else:
+                    sell_str = "-"
                 insider_table.setItem(i, 4, QTableWidgetItem(sell_str))
                 
                 signal = insider.get('signal', 'Neutral')
@@ -1691,37 +1766,51 @@ class ProfileVisualizationWindow(QDialog):
                 elif 'Bearish' in signal:
                     signal_item.setForeground(QColor("#ff6666"))
                 insider_table.setItem(i, 5, signal_item)
-            
+
             insider_table.setMinimumHeight(min(250, 50 + len(insider_holdings) * 30))
             insider_layout.addWidget(insider_table)
             content_layout.addWidget(insider_group)
         
-        # Holding Companies Table
+        # Holding Companies Table - Make Collapsible
         holding_companies = key_persons.get('holding_companies', [])
         if holding_companies:
             holders_group = QGroupBox(f"🏛️ Institutional Shareholders & Holding Companies ({len(holding_companies)})")
+            holders_group.setCheckable(True)
+            holders_group.setChecked(True)  # Expanded by default
             holders_layout = QVBoxLayout(holders_group)
             
             holders_table = QTableWidget()
             holders_table.setColumnCount(5)
             holders_table.setHorizontalHeaderLabels(["Investor/Company", "Ownership %", "Shares", "Type", "Intent/Status"])
             holders_table.setRowCount(len(holding_companies))
-            holders_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
-            holders_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
-            holders_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
-            holders_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
-            holders_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeToContents)
-            
+            # Make columns resizable by user
+            for col in range(5):
+                holders_table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.Interactive)
+            # Set initial column widths
+            holders_table.setColumnWidth(0, 300)  # Investor/Company
+            holders_table.setColumnWidth(1, 120)  # Ownership %
+            holders_table.setColumnWidth(2, 150)  # Shares
+            holders_table.setColumnWidth(3, 120)  # Type
+            holders_table.setColumnWidth(4, 200)  # Intent/Status
+
             for i, holder in enumerate(holding_companies):
                 name_item = QTableWidgetItem(holder.get('name', 'Unknown'))
                 holders_table.setItem(i, 0, name_item)
                 
-                ownership = holder.get('ownership_percent', 0)
-                ownership_str = f"{ownership:.2f}%" if ownership else "N/A"
+                # Fix: Better handling of ownership percentage - handle None, 0, and actual values
+                ownership = holder.get('ownership_percent')
+                if ownership is not None and ownership > 0:
+                    ownership_str = f"{ownership:.2f}%"
+                else:
+                    ownership_str = "N/A"
                 holders_table.setItem(i, 1, QTableWidgetItem(ownership_str))
                 
-                shares = holder.get('shares_owned', 0)
-                shares_str = f"{shares:,}" if shares else "N/A"
+                # Fix: Better handling of shares - handle None, 0, and actual values
+                shares = holder.get('shares_owned')
+                if shares is not None and shares > 0:
+                    shares_str = f"{shares:,}"
+                else:
+                    shares_str = "N/A"
                 holders_table.setItem(i, 2, QTableWidgetItem(shares_str))
                 
                 filing_type = holder.get('filing_type', 'Unknown')
@@ -1734,6 +1823,9 @@ class ProfileVisualizationWindow(QDialog):
                 holders_table.setItem(i, 3, type_item)
                 
                 intent = holder.get('activist_intent', '') if holder.get('is_activist') else 'Passive Investment'
+                # Handle empty or None intent
+                if not intent or intent.strip() == '':
+                    intent = 'Passive Investment' if not holder.get('is_activist') else 'Not specified'
                 holders_table.setItem(i, 4, QTableWidgetItem(intent))
             
             holders_table.setMinimumHeight(min(250, 50 + len(holding_companies) * 30))
@@ -2049,3 +2141,15 @@ class ProfileVisualizationWindow(QDialog):
 
         layout.addWidget(lbl, row, 0, Qt.AlignRight)
         layout.addWidget(val, row, 1, Qt.AlignLeft)
+
+    def _is_recent_filing(self, filing_date: str, months: int = 24) -> bool:
+        """Check if filing date is within the last N months."""
+        if not filing_date or filing_date == 'N/A':
+            return False
+        try:
+            from datetime import datetime, timedelta
+            filing_dt = datetime.strptime(filing_date, '%Y-%m-%d')
+            cutoff_date = datetime.now() - timedelta(days=months * 30)
+            return filing_dt >= cutoff_date
+        except:
+            return False

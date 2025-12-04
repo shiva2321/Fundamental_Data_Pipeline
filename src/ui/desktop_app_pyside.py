@@ -25,7 +25,7 @@ from PySide6.QtCore import Qt, Signal, Slot, QObject
 from PySide6.QtGui import QFont, QColor
 
 from config import load_config
-from mongo_client import MongoWrapper
+from src.clients.mongo_client import MongoWrapper
 from company_ticker_fetcher import CompanyTickerFetcher
 from unified_profile_aggregator import UnifiedSECProfileAggregator
 from sec_edgar_api_client import SECEdgarClient

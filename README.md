@@ -20,6 +20,7 @@ A comprehensive Python-based desktop application for analyzing SEC EDGAR company
 - **Insider Trading (Form 4)**: Buy/sell transactions with dollar amounts and signals
 - **Institutional Ownership (SC 13D/G)**: Activist investors, ownership percentages, intentions
 - **Corporate Governance (DEF 14A)**: CEO compensation, pay ratios, board independence
+- **Key Persons**: Executives, board members, insider holdings with active status tracking
 
 ### 🤖 **AI-Powered Insights**
 - **Local LLM Integration**: Uses Ollama (llama3.2, mistral, phi, etc.)
@@ -36,6 +37,8 @@ A comprehensive Python-based desktop application for analyzing SEC EDGAR company
 - **Zoom & Pan**: Interactive chart navigation
 - **Export Charts**: Save charts as images
 - **Multiple Views**: Absolute values, percentage change, indexed
+- **Resizable Columns**: Adjust table column widths
+- **Collapsible Sections**: Expand/collapse data sections
 
 ### 💾 **Data Management**
 - **MongoDB Storage**: Efficient profile storage and retrieval
@@ -43,6 +46,52 @@ A comprehensive Python-based desktop application for analyzing SEC EDGAR company
 - **Incremental Updates**: Update existing profiles with new data
 - **Profile Manager**: View, edit, delete, and visualize profiles
 - **Export Options**: Export profiles as JSON
+
+---
+
+## 📁 Project Structure
+
+```
+Fundamental_Data_Pipeline/
+├── main.py                 # Application entry point
+├── src/                    # Source code package
+│   ├── parsers/           # SEC filing parsers
+│   │   ├── def14a_parser.py
+│   │   ├── form4_parser.py
+│   │   ├── form_8k_parser.py
+│   │   ├── sc13_parser.py
+│   │   ├── filing_content_parser.py
+│   │   └── key_persons_parser.py
+│   ├── clients/           # External service clients
+│   │   ├── sec_edgar_api_client.py
+│   │   ├── mongo_client.py
+│   │   └── company_ticker_fetcher.py
+│   ├── ui/               # User interface components
+│   │   ├── desktop_app_pyside.py
+│   │   ├── visualization_window.py
+│   │   ├── ollama_manager_dialog.py
+│   │   └── profile_period_editor.py
+│   ├── analysis/         # Data analysis modules
+│   │   ├── ai_analyzer.py
+│   │   └── unified_profile_aggregator.py
+│   └── utils/            # Utility modules
+│       ├── config.py
+│       ├── email_notifier.py
+│       └── ollama_model_manager.py
+├── config/               # Configuration files
+│   └── config.yaml
+├── docs/                 # Documentation
+│   ├── AI_SETUP_GUIDE.md
+│   ├── ARCHITECTURE.md
+│   ├── DATA_DICTIONARY.md
+│   ├── GETTING_STARTED.md
+│   ├── KEY_PERSONS_FINAL_FIX.md
+│   └── QUICK_REFERENCE_KEY_PERSONS.md
+├── tools/                # Testing and utility scripts
+├── requirements.txt      # Python dependencies
+├── run.bat              # Windows launcher
+└── run.sh               # Linux/Mac launcher
+```
 
 ---
 
@@ -112,7 +161,7 @@ run.bat
 ./run.sh
 
 # Or directly
-python desktop_app_pyside.py
+python main.py
 ```
 
 ---

@@ -1,14 +1,4 @@
-# Recommended GUI backends: PySide6 (preferred fallback) or PyQt5
-# If PyQt5 wheels fail on your system, install PySide6 instead:
-# pip install PySide6
-
-# PyQt5 (optional; some systems encounter DLL issues)
-# PyQt5>=5.15.0
-# PyQtChart>=5.15.0
-
-# Alternative Qt provider that often avoids Windows binary issues
 PySide6>=6.5.0
-
 pymongo>=4.0.0
 requests>=2.28.0
 numpy>=1.24.0

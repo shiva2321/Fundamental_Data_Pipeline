@@ -4,6 +4,57 @@ All notable changes to the Fundamental Data Pipeline project.
 
 ---
 
+## [1.1.0] - 2025-12-04
+
+### 🎯 Major Improvements - Key Persons Tab & Project Organization
+
+#### Added
+
+**Key Persons Tab Enhancements:**
+- ✅ **Resizable table columns** - All tables now support Interactive resize mode
+- ✅ **Collapsible sections** - Proper expand/collapse buttons with ▼/▶ arrows (replaced confusing checkboxes)
+- ✅ **Active status tracking** - New "Active" column for executives showing if filing is within 24 months
+- ✅ **Improved data validation** - Stricter filters for institutional investor names
+- ✅ **Better null handling** - Proper display of Net Buy/Sell values (shows "-" when no activity)
+- ✅ **Enhanced name extraction** - Rejects form fields, IRS references, and boilerplate text
+
+**Project Organization:**
+- ✅ **Proper package structure** - Organized code into `src/` with subpackages:
+  - `src/parsers/` - All SEC filing parsers
+  - `src/clients/` - API and database clients
+  - `src/ui/` - User interface components
+  - `src/analysis/` - Analysis and aggregation modules
+  - `src/utils/` - Utility and configuration modules
+- ✅ **Main entry point** - Created `main.py` for clean application launch
+- ✅ **Updated run scripts** - Simplified `run.bat` and `run.sh`
+- ✅ **Consolidated documentation** - Moved old docs to `docs/archive/`
+- ✅ **Clean project root** - Removed temporary and redundant files
+
+#### Fixed
+
+**Key Persons Tab:**
+- ✅ Column resizing now works properly with QHeaderView.ResizeMode.Interactive
+- ✅ Institutional holdings no longer shows invalid names like "S.S. OR I.R.S. IDENTIFICATION NO."
+- ✅ Net Buy/Sell values display correctly (shows actual values when available, "-" when not)
+- ✅ Collapsible sections use proper UI pattern (buttons instead of checkboxes)
+- ✅ Executive list shows active status to distinguish current from historical executives
+
+**Data Quality:**
+- ✅ Institutional investor name validation expanded with 20+ invalid patterns
+- ✅ Form field detection (rejects entries with >30% digits)
+- ✅ Better ownership percentage extraction with multiple pattern matching
+- ✅ Enhanced shares owned extraction with validation
+
+#### Changed
+
+- 📦 Reorganized all Python files into proper package structure
+- 📚 Updated README.md with new project structure
+- 🗂️ Moved documentation to appropriate folders
+- 🧹 Cleaned up root directory
+- 🚀 Simplified application launch process
+
+---
+
 ## [1.0.0] - 2025-12-04
 
 ### ✨ Major Release - Production Ready

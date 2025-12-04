@@ -373,53 +373,144 @@ class SC13ContentParser:
             return {'available': False, 'error': str(e)}
 
     def _extract_investor_name(self, text: str, soup: BeautifulSoup) -> str:
-        """Extract investor/reporting person name."""
-        # Look for common patterns
-        patterns = [
-            r'(?:REPORTING PERSON|FILER):\s*([A-Z][A-Za-z\s,\.&]+?)(?:\n|,)',
-            r'(?:NAME OF REPORTING PERSON|PERSON):\s*([A-Z][A-Za-z\s,\.&]+?)(?:\n|,)',
-            r'Item\s+2\.\s+(?:Identity|Name)[^\n]*\n\s*([A-Z][A-Za-z\s,\.&]+)'
+        """Extract investor/reporting person name with strict validation."""
+        # Look for CUSIP table structure first (most reliable)
+        cusip_patterns = [
+            r'CUSIP\s+No\.?[^\n]*\n[^\n]*\n\s*([A-Z][A-Za-z\s&\.,\-\']+(?:Inc|LLC|LP|Ltd|Limited|Corp|Corporation|Company|Group|Partners|Management|Capital|Advisors|Investments|Trust|Fund|Advisers)\.?)',
         ]
 
-        for pattern in patterns:
-            match = re.search(pattern, text, re.IGNORECASE)
+        for pattern in cusip_patterns:
+            match = re.search(pattern, text, re.IGNORECASE | re.MULTILINE)
             if match:
-                return match.group(1).strip()
+                name = match.group(1).strip()
+                if self._is_valid_investor_name(name):
+                    return self._clean_name(name)
+
+        # Look for structured fields
+        field_patterns = [
+            r'NAME\s+OF\s+REPORTING\s+PERSON[\s:]*\n\s*([A-Z][A-Za-z\s&\.,\-\']+(?:Inc|LLC|LP|Ltd|Limited|Corp|Corporation|Company|Group|Partners|Management|Capital|Advisors|Investments|Trust|Fund|Advisers)\.?)',
+            r'REPORTING\s+PERSON[\s:]*\n\s*([A-Z][A-Za-z\s&\.,\-\']+(?:Inc|LLC|LP|Ltd|Limited|Corp|Corporation|Company|Group|Partners|Management|Capital|Advisors|Investments|Trust|Fund|Advisers)\.?)',
+            r'Item\s+2\.\s*(?:Identity|Name)[^\n]*\n+\s*([A-Z][A-Za-z\s&\.,\-\']+(?:Inc|LLC|LP|Ltd|Limited|Corp|Corporation|Company|Group|Partners|Management|Capital|Advisors|Investments|Trust|Fund|Advisers)\.?)',
+        ]
+
+        for pattern in field_patterns:
+            match = re.search(pattern, text, re.IGNORECASE | re.MULTILINE)
+            if match:
+                name = match.group(1).strip()
+                if self._is_valid_investor_name(name):
+                    return self._clean_name(name)
 
         return "Unknown Investor"
 
-    def _extract_ownership_percent(self, text: str) -> float:
-        """Extract ownership percentage."""
-        # Look for percentage patterns
-        patterns = [
-            r'(?:represent|constitutes|equal)\s+(?:approximately\s+)?(\d+\.?\d*)\s*%',
-            r'(\d+\.?\d*)\s*%\s+of\s+(?:the\s+)?(?:outstanding|issued)',
-            r'ownership\s+of\s+(\d+\.?\d*)\s*%'
+    def _is_valid_investor_name(self, name: str) -> bool:
+        """Validate if extracted name is actually an investor name."""
+        if not name or len(name) < 5:
+            return False
+
+        # Lowercase for checking
+        name_lower = name.lower()
+
+        # Reject common false positives - EXPANDED LIST
+        invalid_patterns = [
+            'applicable', 'pursuant', 'filed', 'statement', 'check', 'box',
+            'designate', 'december', 'date', 'event', 'requires', 'rule',
+            'item', 'cusip', 'none', 'see', 'exhibit', 'cover', 'page',
+            'company data', 'not', 'n/a', 'identification', 'i.r.s', 'irs',
+            'above person', 's.s.', 'social security', 'tax', 'number',
+            'ein', 'employer', 'instructions', 'attach', 'schedule',
+            'amendment', 'signature', 'certify', 'form', 'sec file',
+            'paragraph', 'section', 'line'
         ]
 
-        for pattern in patterns:
-            match = re.search(pattern, text, re.IGNORECASE)
-            if match:
-                return float(match.group(1))
+        if any(invalid in name_lower for invalid in invalid_patterns):
+            return False
 
-        return 0.0
+        # Reject if it looks like a form field (contains multiple numbers/symbols)
+        if sum(c.isdigit() for c in name) > len(name) * 0.3:  # More than 30% digits
+            return False
+
+        # Must contain at least one capital letter (proper noun)
+        if not any(c.isupper() for c in name):
+            return False
+
+        # Should have entity suffix or be a fund name
+        entity_suffixes = ['inc', 'llc', 'lp', 'ltd', 'limited', 'corp', 'corporation',
+                          'company', 'group', 'partners', 'management', 'capital',
+                          'advisors', 'investments', 'trust', 'fund', 'advisers']
+
+        # At least has an entity suffix OR looks like a fund/investment name
+        has_suffix = any(suffix in name_lower for suffix in entity_suffixes)
+        looks_like_fund = any(word in name_lower for word in ['vanguard', 'blackrock', 'fidelity', 'state street', 'capital', 'management'])
+
+        return has_suffix or looks_like_fund
+
+    def _clean_name(self, name: str) -> str:
+        """Clean up extracted investor name."""
+        # Remove extra whitespace
+        name = re.sub(r'\s+', ' ', name).strip()
+        # Remove trailing punctuation except period for Inc. etc.
+        name = name.rstrip(',;')
+        return name
+
+    def _extract_ownership_percent(self, text: str) -> float:
+        """Extract ownership percentage with better validation."""
+        # Pattern priority: specific Item 11, then general patterns
+        patterns = [
+            # Item 11 - Percent of Class (most reliable)
+            r'Item\s+11\.[^\n]*Percent\s+of\s+Class[^\n]*\n[^\n]*?(\d+\.?\d*)\s*%',
+            r'Item\s+11\.[^\n]*\n[^\n]*?(\d+\.?\d*)\s*%',
+            # Table format
+            r'Percent\s+of\s+Class[^\d]*?(\d+\.?\d*)\s*%',
+            # Direct statements
+            r'(?:beneficially\s+own|represent|constitute|equal|aggregate)\s+(?:approximately\s+)?(\d+\.?\d*)\s*%\s+of',
+            r'(\d+\.?\d*)\s*%\s+of\s+(?:the\s+)?(?:outstanding|issued|total)\s+(?:shares|common\s+stock)',
+            r'ownership\s+of\s+(\d+\.?\d*)\s*%',
+        ]
+
+        max_percent = 0.0
+        for pattern in patterns:
+            matches = re.finditer(pattern, text, re.IGNORECASE | re.MULTILINE)
+            for match in matches:
+                try:
+                    percent = float(match.group(1))
+                    # Validate: must be between 0.01 and 100 (less than 0.01% is likely noise)
+                    if 0.01 <= percent <= 100 and percent > max_percent:
+                        max_percent = percent
+                except (ValueError, IndexError):
+                    continue
+
+        return max_percent
 
     def _extract_shares_owned(self, text: str) -> int:
         """Extract number of shares owned."""
-        # Look for share count patterns
+        # Look for share count patterns with better validation
         patterns = [
-            r'(\d+,?\d+,?\d+)\s+(?:shares|common stock)',
-            r'beneficial owner of\s+(\d+,?\d+,?\d+)',
-            r'aggregate of\s+(\d+,?\d+,?\d+)\s+shares'
+            # Pattern 1: Shares owned/held
+            r'(?:owns?|holds?|beneficially\s+own)\s+(?:an\s+aggregate\s+of\s+)?(\d+,?\d+,?\d+)\s+(?:shares|common\s+stock)',
+            # Pattern 2: Beneficial owner of X shares
+            r'beneficial\s+owner\s+of\s+(\d+,?\d+,?\d+)',
+            # Pattern 3: Aggregate of X shares
+            r'aggregate\s+of\s+(\d+,?\d+,?\d+)\s+shares',
+            # Pattern 4: Item 9 - Number of shares
+            r'Item\s+9\.[^\n]*\n[^\n]*?(\d+,?\d+,?\d+)',
+            # Pattern 5: Table with shares
+            r'(?:Amount\s+Beneficially\s+Owned|Number\s+of\s+Shares)[^\d]*(\d+,?\d+,?\d+)'
         ]
 
+        max_shares = 0
         for pattern in patterns:
-            match = re.search(pattern, text, re.IGNORECASE)
-            if match:
-                shares_str = match.group(1).replace(',', '')
-                return int(shares_str)
+            matches = re.finditer(pattern, text, re.IGNORECASE)
+            for match in matches:
+                try:
+                    shares_str = match.group(1).replace(',', '').replace(' ', '')
+                    shares = int(shares_str)
+                    # Keep the largest reasonable number found (but not absurdly large)
+                    if shares > max_shares and shares < 1000000000000:  # Less than 1 trillion
+                        max_shares = shares
+                except (ValueError, IndexError):
+                    continue
 
-        return 0
+        return max_shares
 
     def _extract_purpose(self, text: str) -> str:
         """Extract purpose statement from 13D (Item 4)."""

@@ -47,17 +47,17 @@ rate_limits:
   polygon: 120
 ui_settings:
   dashboard_splitter_sizes:
-  - 641
-  - 924
+  - 680
+  - 981
   main_splitter_sizes:
   - 1214
   - 143
   splitter_sizes: []
   window_geometry:
-    height: 1340
-    width: 1609
-    x: 113
-    y: 89
+    height: 1420
+    width: 1705
+    x: 36
+    y: 30
 update_frequency:
   fundamentals: DAILY
   institutional: QUARTERLY
