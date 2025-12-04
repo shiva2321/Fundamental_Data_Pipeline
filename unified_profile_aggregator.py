@@ -203,6 +203,30 @@ class UnifiedSECProfileAggregator:
                 'insights': []
             }
 
+        # === SECTION 1.9: Key Persons (Executives, Board, Insiders, Holdings) ===
+        log('info', "Extracting key persons data (executives, board, insiders, holding companies)")
+        try:
+            from key_persons_parser import KeyPersonsParser
+            key_persons_parser = KeyPersonsParser()
+            key_persons_data = key_persons_parser.parse_key_persons(filings, cik)
+            profile["key_persons"] = key_persons_data
+            summary = key_persons_data.get('summary', {})
+            exec_count = summary.get('executive_count', 0)
+            board_count = summary.get('board_member_count', 0)
+            insider_count = summary.get('insider_holdings', {}).get('count', 0)
+            holder_count = summary.get('institutional_ownership', {}).get('holder_count', 0)
+            log('info', f"Extracted key persons: {exec_count} executives, {board_count} board members, {insider_count} insiders, {holder_count} institutional holders")
+        except Exception as e:
+            logger.warning(f"Could not parse key persons data: {e}")
+            profile["key_persons"] = {
+                'executives': [],
+                'board_members': [],
+                'insider_holdings': [],
+                'holding_companies': [],
+                'summary': {},
+                'error': str(e)
+            }
+
         # === SECTION 2: Financial Data ===
         log('info', "Extracting financial time series")
         financials = self._extract_financial_time_series(filings, cik, metrics=financial_metrics)
