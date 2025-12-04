@@ -8,22 +8,21 @@ Features:
 - Professional Dark Theme
 """
 import sys
-import os
 import json
 import logging
 import threading
 import queue
 from datetime import datetime
-from typing import Optional, List, Dict, Any
+from typing import List
 from enum import Enum
 
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                                QLabel, QPushButton, QLineEdit, QTextEdit, QTabWidget, 
                                QTableWidget, QTableWidgetItem, QHeaderView, QCheckBox, 
                                QSpinBox, QComboBox, QMessageBox, QProgressBar, QGroupBox, 
-                               QSplitter, QFrame, QScrollArea, QDialog, QDialogButtonBox)
-from PySide6.QtCore import Qt, QTimer, Signal, Slot, QObject
-from PySide6.QtGui import QFont, QColor, QPalette, QIcon
+                               QSplitter, QDialog, QDialogButtonBox)
+from PySide6.QtCore import Qt, Signal, Slot, QObject
+from PySide6.QtGui import QFont, QColor
 
 from config import load_config
 from mongo_client import MongoWrapper
@@ -119,6 +118,17 @@ QPushButton#WarningButton {
 QPushButton#WarningButton:hover {
     background-color: #ffca2c;
 }
+QPushButton#OllamaStatusButton {
+    background-color: #6c757d;
+    color: white;
+    font-weight: bold;
+    padding: 5px 10px;
+    border-radius: 4px;
+    border: none;
+}
+QPushButton#OllamaStatusButton:hover {
+    opacity: 0.9;
+}
 QTableWidget {
     background-color: #2d2d2d;
     gridline-color: #3e3e3e;
@@ -170,17 +180,26 @@ class WorkerSignals(QObject):
     stats_updated = Signal(dict)
 
 class EnhancedBackgroundWorker(threading.Thread):
-    def __init__(self, task_queue, signals, aggregator, ticker_fetcher, mongo):
+    def __init__(self, task_queue, signals, aggregator, ticker_fetcher, mongo, config):
         super().__init__(daemon=True)
         self.task_queue = task_queue
         self.signals = signals
         self.aggregator = aggregator
         self.ticker_fetcher = ticker_fetcher
         self.mongo = mongo
+        self.config = config
         self._stop_event = threading.Event()
         self._pause_events = {}  # ticker -> Event
         self._cancel_flags = {}  # ticker -> bool
         
+        # Email notification support
+        try:
+            from email_notifier import EmailNotifier
+            self.email_notifier = EmailNotifier(config)
+        except Exception as e:
+            logger.warning(f"Email notifier initialization failed: {e}")
+            self.email_notifier = None
+
     def run(self):
         while not self._stop_event.is_set():
             try:
@@ -207,6 +226,14 @@ class EnhancedBackgroundWorker(threading.Thread):
                     self._cancel_flags[ticker] = True
                     if ticker in self._pause_events:
                         self._pause_events[ticker].set()  # Unpause to allow cancellation
+                    self.signals.progress.emit(ticker, 'info', f"Cancellation requested for {ticker}")
+                elif action == 'cancel_all':
+                    # Cancel all running tickers
+                    for ticker in list(self._cancel_flags.keys()):
+                        self._cancel_flags[ticker] = True
+                        if ticker in self._pause_events:
+                            self._pause_events[ticker].set()
+                    self.signals.progress.emit('', 'info', "Cancellation requested for all tickers")
                 elif action == 'refresh_stats':
                     self._handle_stats()
             except Exception as e:
@@ -221,12 +248,27 @@ class EnhancedBackgroundWorker(threading.Thread):
         options = task.get('options', {})
         collection = task.get('collection')
 
+        # Initialize email tracking
+        email_results = {
+            'total': len(identifiers),
+            'successful': 0,
+            'failed': 0,
+            'tickers': [],
+            'failed_tickers': [],
+            'start_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'database': self.config.get('mongodb', {}).get('db_name', 'N/A'),
+            'collection': collection or 'N/A'
+        }
+        start_time = datetime.now()
+
         self.signals.progress.emit('', 'started', f"Starting batch of {len(identifiers)} companies...")
 
         for idx, identifier in enumerate(identifiers, 1):
-            if self._stop_event.is_set():
-                self.signals.progress.emit('', 'info', "Process stopped by user.")
-                break
+            # Early cancellation check - before any processing
+            if self._stop_event.is_set() or self._cancel_flags.get(identifier, False):
+                self.signals.progress.emit(identifier, 'info', f"Skipping cancelled ticker: {identifier}")
+                self.signals.ticker_status_changed.emit(identifier, TickerStatus.CANCELLED.value, 0)
+                continue
 
             # Initialize pause event for this ticker
             self._pause_events[identifier] = threading.Event()
@@ -294,9 +336,13 @@ class EnhancedBackgroundWorker(threading.Thread):
                     self.signals.progress.emit(identifier, 'company_finish', f"Successfully generated profile for {identifier}")
                     self.signals.ticker_status_changed.emit(identifier, TickerStatus.COMPLETED.value, 100)
                     self._clear_checkpoint(identifier, collection)
+                    email_results['successful'] += 1
+                    email_results['tickers'].append(identifier)
                 else:
                     self.signals.progress.emit(identifier, 'error', f"Failed to generate profile for {identifier}")
                     self.signals.ticker_status_changed.emit(identifier, TickerStatus.FAILED.value, 0)
+                    email_results['failed'] += 1
+                    email_results['failed_tickers'].append(identifier)
 
             except Exception as e:
                 if "Cancelled" in str(e):
@@ -307,12 +353,39 @@ class EnhancedBackgroundWorker(threading.Thread):
                     self.signals.ticker_status_changed.emit(identifier, TickerStatus.FAILED.value, 0)
                     # Save checkpoint for resume
                     self._save_checkpoint(identifier, collection, {'error': str(e)})
-            
+                    email_results['failed'] += 1
+                    email_results['failed_tickers'].append(identifier)
+
+                    # Send ticker failure notification if enabled
+                    if self.email_notifier:
+                        try:
+                            context = {
+                                'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                                'attempt': 1,
+                                'max_attempts': 1,
+                                'lookback_years': options.get('lookback_years', 'N/A'),
+                                'filing_limit': options.get('filing_limit', 'N/A')
+                            }
+                            self.email_notifier.send_ticker_failure_report(identifier, str(e), context)
+                        except Exception as email_err:
+                            logger.error(f"Failed to send ticker failure email: {email_err}")
+
             # Cleanup
             if identifier in self._pause_events:
                 del self._pause_events[identifier]
             if identifier in self._cancel_flags:
                 del self._cancel_flags[identifier]
+
+        # Send completion email
+        end_time = datetime.now()
+        email_results['end_time'] = end_time.strftime('%Y-%m-%d %H:%M:%S')
+        email_results['duration'] = str(end_time - start_time).split('.')[0]
+
+        if self.email_notifier:
+            try:
+                self.email_notifier.send_completion_report(email_results)
+            except Exception as e:
+                logger.error(f"Failed to send completion email: {e}")
 
         self.signals.finished.emit()
         self._handle_stats()
@@ -374,8 +447,120 @@ class MainWindow(QMainWindow):
         self.setup_ui()
         self.apply_styles()
 
+        # Restore window geometry
+        self._restore_window_geometry()
+
         # Start Worker
         self.start_worker()
+
+    def _save_splitter_state(self):
+        """Save splitter sizes to config."""
+        if 'ui_settings' not in self.config:
+            self.config['ui_settings'] = {}
+
+        # Save main splitter sizes
+        if hasattr(self, 'main_splitter'):
+            self.config['ui_settings']['main_splitter_sizes'] = self.main_splitter.sizes()
+
+        # Save dashboard splitter sizes
+        if hasattr(self, 'dashboard_splitter'):
+            self.config['ui_settings']['dashboard_splitter_sizes'] = self.dashboard_splitter.sizes()
+
+        # Save to file
+        self.config_manager.save_config()
+
+    def _restore_window_geometry(self):
+        """Restore window position and size from config."""
+        geometry = self.config.get('ui_settings', {}).get('window_geometry', {})
+        if geometry:
+            x = geometry.get('x', 100)
+            y = geometry.get('y', 100)
+            width = geometry.get('width', 1400)
+            height = geometry.get('height', 900)
+            self.setGeometry(x, y, width, height)
+
+    def log_message(self, msg):
+        """Log message to Dashboard and Queue Monitor log widgets."""
+        from datetime import datetime
+        ts = datetime.now().strftime("%H:%M:%S")
+        formatted_msg = f"[{ts}] {msg}"
+
+        # Log to dashboard logs
+        if hasattr(self, 'dashboard_log_text'):
+            self.dashboard_log_text.append(formatted_msg)
+
+        # Log to queue monitor logs
+        if hasattr(self, 'queue_log_text'):
+            self.queue_log_text.append(formatted_msg)
+
+    def toggle_all_models(self):
+        """Toggle only downloaded/available model checkboxes on/off."""
+        select_all = self.chk_select_all_models.isChecked()
+
+        if select_all:
+            # Get available models from Ollama
+            try:
+                import requests
+                response = requests.get("http://localhost:11434/api/tags", timeout=2)
+                if response.status_code == 200:
+                    data = response.json()
+                    # Extract base model names (handle variants like llama2-uncensored, phi:latest, etc.)
+                    available_models = []
+                    for model in data.get('models', []):
+                        name = model['name'].split(':')[0]  # Remove :latest
+                        # Extract base name (handle llama2-uncensored -> llama2, etc.)
+                        base_name = name.split('-')[0]  # Get first part before dash
+                        available_models.append(name)  # Add full name
+                        available_models.append(base_name)  # Add base name
+
+                    # Only check models that are available
+                    checked_count = 0
+                    for model_name, chk in self.model_checks.items():
+                        # Check if model or any variant is available
+                        is_available = any(
+                            model_name in avail_model or avail_model in model_name
+                            for avail_model in available_models
+                        )
+                        chk.setChecked(is_available)
+                        if is_available:
+                            checked_count += 1
+
+                    self.log_message(f"Selected {checked_count} available models")
+                else:
+                    # Ollama not available, show warning
+                    QMessageBox.warning(self, "Ollama Not Available",
+                                      "Cannot connect to Ollama. Please ensure Ollama is running.")
+                    self.chk_select_all_models.setChecked(False)
+            except Exception as e:
+                QMessageBox.warning(self, "Error", f"Failed to get available models: {e}")
+                self.chk_select_all_models.setChecked(False)
+        else:
+            # Deselect all
+            for chk in self.model_checks.values():
+                chk.setChecked(False)
+
+    def closeEvent(self, event):
+        """Save window geometry before closing."""
+        if 'ui_settings' not in self.config:
+            self.config['ui_settings'] = {}
+
+        # Save window geometry
+        geometry = self.geometry()
+        self.config['ui_settings']['window_geometry'] = {
+            'x': geometry.x(),
+            'y': geometry.y(),
+            'width': geometry.width(),
+            'height': geometry.height()
+        }
+
+        # Save splitter states one more time
+        self._save_splitter_state()
+
+        # Stop worker thread
+        if hasattr(self, 'worker'):
+            self.worker.stop()
+
+        event.accept()
 
     def init_backend(self):
         self.mongo = MongoWrapper(uri=self.config['mongodb']['uri'], database=self.config['mongodb']['db_name'])
@@ -383,6 +568,9 @@ class MainWindow(QMainWindow):
         self.aggregator = UnifiedSECProfileAggregator(self.mongo, self.sec_client)
         self.ticker_fetcher = CompanyTickerFetcher()
         
+        # Processing queue
+        self.processing_queue = []  # List of ticker identifiers to process
+
         self.task_queue = queue.Queue()
         self.worker_signals = WorkerSignals()
         self.worker_signals.progress.connect(self.handle_progress)
@@ -392,7 +580,7 @@ class MainWindow(QMainWindow):
         self.worker_signals.stats_updated.connect(self.update_stats_ui)
 
     def start_worker(self):
-        self.worker = EnhancedBackgroundWorker(self.task_queue, self.worker_signals, self.aggregator, self.ticker_fetcher, self.mongo)
+        self.worker = EnhancedBackgroundWorker(self.task_queue, self.worker_signals, self.aggregator, self.ticker_fetcher, self.mongo, self.config)
         self.worker.start()
         # Initial stats
         self.task_queue.put({'action': 'refresh_stats'})
@@ -410,45 +598,46 @@ class MainWindow(QMainWindow):
         
         self.lbl_total_companies = QLabel("Total Companies: ...")
         self.lbl_profiles_db = QLabel("Profiles in DB: ...")
+
+        # Make Ollama status clickable
+        self.lbl_ollama_status = QPushButton("Ollama: Checking...")
+        self.lbl_ollama_status.setFlat(True)
+        self.lbl_ollama_status.setObjectName("OllamaStatusButton")  # Add object name for styling
+        self.lbl_ollama_status.setCursor(Qt.PointingHandCursor)
+        self.lbl_ollama_status.clicked.connect(self.open_model_manager)
+        self.lbl_ollama_status.setToolTip("Click to manage Ollama models")
+
         self.lbl_status = QLabel("Status: Ready")
         self.lbl_status.setStyleSheet("color: #4da6ff; font-weight: bold;")
 
         top_layout.addWidget(self.lbl_total_companies)
         top_layout.addSpacing(20)
         top_layout.addWidget(self.lbl_profiles_db)
+        top_layout.addSpacing(20)
+        top_layout.addWidget(self.lbl_ollama_status)
         top_layout.addStretch()
         top_layout.addWidget(self.lbl_status)
         
         main_layout.addWidget(self.top_bar)
 
-        # 2. Main Content (Tabs)
+        # Check Ollama status
+        self._check_ollama_status()
+
+        # Main Content - Tabs only (logs moved to Dashboard and Queue Monitor)
         self.tabs = QTabWidget()
-        self.tabs.addTab(self.create_dashboard_tab(), "Dashboard & Generate")
+        self.tabs.addTab(self.create_dashboard_tab(), "Dashboard_Generate")
         self.tabs.addTab(self.create_queue_monitor_tab(), "Queue Monitor")
         self.tabs.addTab(self.create_profiles_tab(), "Profile Manager")
         self.tabs.addTab(self.create_settings_tab(), "Settings")
         
         main_layout.addWidget(self.tabs)
 
-        # 3. Logs Panel
-        self.logs_group = QGroupBox("Pipeline Execution Logs")
-        logs_layout = QVBoxLayout(self.logs_group)
-        self.log_text = QTextEdit()
-        self.log_text.setReadOnly(True)
-        self.log_text.setMaximumHeight(180)
-        logs_layout.addWidget(self.log_text)
-        
-        # Clear Logs Button
-        btn_clear_logs = QPushButton("Clear Logs")
-        btn_clear_logs.setObjectName("SecondaryButton")
-        btn_clear_logs.clicked.connect(self.log_text.clear)
-        logs_layout.addWidget(btn_clear_logs, alignment=Qt.AlignRight)
-
-        main_layout.addWidget(self.logs_group)
-
     def create_dashboard_tab(self):
         tab = QWidget()
         layout = QHBoxLayout(tab)
+
+        # Create horizontal splitter for left and right panels
+        self.dashboard_splitter = QSplitter(Qt.Horizontal)
 
         # Left Column: Controls
         left_panel = QWidget()
@@ -484,6 +673,49 @@ class MainWindow(QMainWindow):
         
         left_layout.addWidget(grp_search)
 
+        # Processing Queue Group
+        grp_queue = QGroupBox("Processing Queue")
+        queue_layout = QVBoxLayout(grp_queue)
+
+        # Queue info label
+        self.lbl_queue_count = QLabel("0 tickers in queue")
+        self.lbl_queue_count.setStyleSheet("font-weight: bold; color: #4da6ff;")
+        queue_layout.addWidget(self.lbl_queue_count)
+
+        # Queue table (pending items before processing starts)
+        self.dashboard_queue_table = QTableWidget()
+        self.dashboard_queue_table.setColumnCount(3)
+        self.dashboard_queue_table.setHorizontalHeaderLabels(["Ticker", "Status", "Actions"])
+        self.dashboard_queue_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        self.dashboard_queue_table.setMaximumHeight(200)
+        queue_layout.addWidget(self.dashboard_queue_table)
+
+        # Queue action buttons
+        queue_btn_layout = QHBoxLayout()
+
+        btn_clear_queue = QPushButton("Clear Queue")
+        btn_clear_queue.setObjectName("DangerButton")
+        btn_clear_queue.clicked.connect(self.clear_queue)
+        queue_btn_layout.addWidget(btn_clear_queue)
+
+        queue_btn_layout.addStretch()
+
+        self.btn_start_processing = QPushButton("🚀 START PROCESSING")
+        self.btn_start_processing.setObjectName("SuccessButton")
+        self.btn_start_processing.setMinimumHeight(50)
+        self.btn_start_processing.setStyleSheet("""
+            QPushButton#SuccessButton {
+                font-size: 16px;
+                font-weight: bold;
+            }
+        """)
+        self.btn_start_processing.clicked.connect(self.start_queue_processing)
+        queue_btn_layout.addWidget(self.btn_start_processing)
+
+        queue_layout.addLayout(queue_btn_layout)
+
+        left_layout.addWidget(grp_queue)
+
         # Options Group
         grp_options = QGroupBox("Configuration")
         opts_layout = QVBoxLayout(grp_options)
@@ -496,6 +728,58 @@ class MainWindow(QMainWindow):
         self.spin_lookback.setValue(self.config.get('profile_settings', {}).get('lookback_years', 10))
         h_lookback.addWidget(self.spin_lookback)
         opts_layout.addLayout(h_lookback)
+
+        # Filing Limit
+        h_filing_limit = QHBoxLayout()
+        h_filing_limit.addWidget(QLabel("Filing Limit:"))
+        self.spin_filing_limit = QSpinBox()
+        self.spin_filing_limit.setRange(0, 10000)
+        self.spin_filing_limit.setSpecialValueText("All Available")
+        filing_limit = self.config.get('profile_settings', {}).get('filing_limit')
+        self.spin_filing_limit.setValue(0 if filing_limit is None else filing_limit)
+        h_filing_limit.addWidget(self.spin_filing_limit)
+        opts_layout.addLayout(h_filing_limit)
+
+        # AI Model Selection
+        h_ai_model = QHBoxLayout()
+        h_ai_model.addWidget(QLabel("AI Model:"))
+        self.combo_ai_model = QComboBox()
+        self.combo_ai_model.addItems(["llama3.2", "mistral", "llama2", "codellama", "phi", "gemma"])
+        current_model = self.config.get('profile_settings', {}).get('ai_model', 'llama3.2')
+        index = self.combo_ai_model.findText(current_model)
+        if index >= 0:
+            self.combo_ai_model.setCurrentIndex(index)
+        h_ai_model.addWidget(self.combo_ai_model)
+        opts_layout.addLayout(h_ai_model)
+
+        # Multi-Model Analysis
+        multi_model_label = QLabel("Multi-Model Analysis (compare models):")
+        multi_model_label.setStyleSheet("font-weight: bold; margin-top: 10px;")
+        opts_layout.addWidget(multi_model_label)
+
+        # Select All Models checkbox
+        self.chk_select_all_models = QCheckBox("✓ Select All Available Models")
+        self.chk_select_all_models.setStyleSheet("font-weight: bold; color: #4da6ff;")
+        self.chk_select_all_models.clicked.connect(self.toggle_all_models)
+        opts_layout.addWidget(self.chk_select_all_models)
+
+        self.model_checks = {}
+        available_models = ["llama3.2", "mistral", "llama2", "phi", "gemma", "codellama"]
+        for model in available_models:
+            chk = QCheckBox(model)
+            chk.setChecked(model == current_model)  # Default to current model selected
+            self.model_checks[model] = chk
+            opts_layout.addWidget(chk)
+
+        multi_info = QLabel("ℹ Select multiple models to compare AI analysis side-by-side")
+        multi_info.setStyleSheet("color: #6c757d; font-size: 11px; font-style: italic;")
+        multi_info.setWordWrap(True)
+        opts_layout.addWidget(multi_info)
+
+        # AI Enabled
+        self.chk_ai_enabled = QCheckBox("Enable AI Analysis During Profile Generation")
+        self.chk_ai_enabled.setChecked(self.config.get('profile_settings', {}).get('ai_enabled', True))
+        opts_layout.addWidget(self.chk_ai_enabled)
 
         # Incremental
         self.chk_incremental = QCheckBox("Incremental Update (Merge new filings)")
@@ -527,9 +811,10 @@ class MainWindow(QMainWindow):
         quick_layout.addWidget(QLabel("Single Identifier:"))
         quick_layout.addWidget(self.input_ticker)
         
-        self.btn_generate_single = QPushButton("Generate Profile Now")
-        self.btn_generate_single.clicked.connect(self.generate_single)
-        quick_layout.addWidget(self.btn_generate_single)
+        self.btn_add_single = QPushButton("Add to Queue")
+        self.btn_add_single.setObjectName("SuccessButton")
+        self.btn_add_single.clicked.connect(self.add_single_to_queue)
+        quick_layout.addWidget(self.btn_add_single)
 
         quick_layout.addSpacing(10)
         
@@ -539,10 +824,11 @@ class MainWindow(QMainWindow):
         quick_layout.addWidget(QLabel("Batch Processing:"))
         quick_layout.addWidget(self.input_batch)
         
-        self.btn_generate_batch = QPushButton("Process Batch")
-        self.btn_generate_batch.clicked.connect(self.generate_batch)
-        quick_layout.addWidget(self.btn_generate_batch)
-        
+        self.btn_add_batch = QPushButton("Add All to Queue")
+        self.btn_add_batch.setObjectName("SuccessButton")
+        self.btn_add_batch.clicked.connect(self.add_batch_to_queue)
+        quick_layout.addWidget(self.btn_add_batch)
+
         quick_layout.addSpacing(15)
         
         # Bulk Selection
@@ -568,11 +854,40 @@ class MainWindow(QMainWindow):
         quick_layout.addWidget(self.btn_top_n)
         
         right_layout.addWidget(grp_quick)
-        right_layout.addStretch()
 
-        layout.addWidget(left_panel, 1)
-        layout.addWidget(right_panel, 1)
-        
+        # Pipeline Execution Logs in Dashboard (expandable)
+        dashboard_logs_group = QGroupBox("Pipeline Execution Logs")
+        dashboard_logs_layout = QVBoxLayout(dashboard_logs_group)
+        self.dashboard_log_text = QTextEdit()
+        self.dashboard_log_text.setReadOnly(True)
+        self.dashboard_log_text.setMinimumHeight(150)  # Minimum height only, can expand
+        dashboard_logs_layout.addWidget(self.dashboard_log_text)
+
+        btn_clear_dashboard_logs = QPushButton("Clear Logs")
+        btn_clear_dashboard_logs.setObjectName("SecondaryButton")
+        btn_clear_dashboard_logs.clicked.connect(self.dashboard_log_text.clear)
+        dashboard_logs_layout.addWidget(btn_clear_dashboard_logs, alignment=Qt.AlignRight)
+
+        right_layout.addWidget(dashboard_logs_group)
+        # Right layout will now stretch to fill available space
+
+        # Add panels to splitter
+        self.dashboard_splitter.addWidget(left_panel)
+        self.dashboard_splitter.addWidget(right_panel)
+
+        # Set initial sizes (equal split)
+        self.dashboard_splitter.setSizes([500, 500])
+
+        # Restore saved sizes if available
+        saved_sizes = self.config.get('ui_settings', {}).get('dashboard_splitter_sizes', [])
+        if saved_sizes:
+            self.dashboard_splitter.setSizes(saved_sizes)
+
+        # Connect to save state
+        self.dashboard_splitter.splitterMoved.connect(self._save_splitter_state)
+
+        layout.addWidget(self.dashboard_splitter)
+
         return tab
 
     def create_queue_monitor_tab(self):
@@ -598,6 +913,11 @@ class MainWindow(QMainWindow):
         btn_cancel.clicked.connect(self.cancel_selected_ticker)
         ctrl_layout.addWidget(btn_cancel)
         
+        btn_cancel_all = QPushButton("Cancel All")
+        btn_cancel_all.setObjectName("DangerButton")
+        btn_cancel_all.clicked.connect(self.cancel_all_tickers)
+        ctrl_layout.addWidget(btn_cancel_all)
+
         btn_retry = QPushButton("Retry Failed")
         btn_retry.setObjectName("SecondaryButton")
         btn_retry.clicked.connect(self.retry_failed_ticker)
@@ -613,6 +933,21 @@ class MainWindow(QMainWindow):
         self.queue_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
         self.queue_table.setSelectionBehavior(QTableWidget.SelectRows)
         layout.addWidget(self.queue_table)
+
+        # Pipeline Execution Logs in Queue Monitor
+        queue_logs_group = QGroupBox("Pipeline Execution Logs")
+        queue_logs_layout = QVBoxLayout(queue_logs_group)
+        self.queue_log_text = QTextEdit()
+        self.queue_log_text.setReadOnly(True)
+        self.queue_log_text.setMinimumHeight(150)
+        queue_logs_layout.addWidget(self.queue_log_text)
+
+        btn_clear_queue_logs = QPushButton("Clear Logs")
+        btn_clear_queue_logs.setObjectName("SecondaryButton")
+        btn_clear_queue_logs.clicked.connect(self.queue_log_text.clear)
+        queue_logs_layout.addWidget(btn_clear_queue_logs, alignment=Qt.AlignRight)
+
+        layout.addWidget(queue_logs_group)
 
         return tab
 
@@ -636,6 +971,11 @@ class MainWindow(QMainWindow):
         self.btn_edit_profile.clicked.connect(self.edit_profile)
         ctrl_layout.addWidget(self.btn_edit_profile)
         
+        self.btn_edit_period = QPushButton("Edit Period")
+        self.btn_edit_period.setObjectName("SecondaryButton")
+        self.btn_edit_period.clicked.connect(self.edit_profile_period)
+        ctrl_layout.addWidget(self.btn_edit_period)
+
         self.btn_visualize_profile = QPushButton("Visualize Selected")
         self.btn_visualize_profile.setObjectName("SuccessButton")
         self.btn_visualize_profile.clicked.connect(self.visualize_profile)
@@ -651,10 +991,11 @@ class MainWindow(QMainWindow):
 
         # Table
         self.profiles_table = QTableWidget()
-        self.profiles_table.setColumnCount(4)
-        self.profiles_table.setHorizontalHeaderLabels(["Ticker", "Name", "CIK", "Last Generated"])
+        self.profiles_table.setColumnCount(6)
+        self.profiles_table.setHorizontalHeaderLabels(["Ticker", "Name", "CIK", "Last Generated", "Period From", "Period To"])
         self.profiles_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
         self.profiles_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.profiles_table.setSelectionMode(QTableWidget.MultiSelection)  # Enable multi-selection
         self.profiles_table.doubleClicked.connect(self.visualize_profile)  # Double-click to visualize
         layout.addWidget(self.profiles_table)
 
@@ -678,9 +1019,88 @@ class MainWindow(QMainWindow):
         
         layout.addWidget(grp_mongo)
 
+        # AI Model Management
+        grp_ai = QGroupBox("AI Model Management")
+        ai_layout = QVBoxLayout(grp_ai)
+
+        ai_desc = QLabel("Manage Ollama models for AI analysis")
+        ai_layout.addWidget(ai_desc)
+
+        btn_manage_models = QPushButton("Manage Ollama Models")
+        btn_manage_models.setObjectName("SuccessButton")
+        btn_manage_models.clicked.connect(self.open_model_manager)
+        ai_layout.addWidget(btn_manage_models)
+
+        layout.addWidget(grp_ai)
+
+        # Email Notifications
+        grp_email = QGroupBox("Email Notifications")
+        email_layout = QVBoxLayout(grp_email)
+
+        self.chk_email_enabled = QCheckBox("Enable Email Notifications")
+        self.chk_email_enabled.setChecked(self.config.get('email_notifications', {}).get('enabled', False))
+        email_layout.addWidget(self.chk_email_enabled)
+
+        # SMTP Settings
+        smtp_layout = QVBoxLayout()
+
+        h_server = QHBoxLayout()
+        h_server.addWidget(QLabel("SMTP Server:"))
+        self.input_smtp_server = QLineEdit(self.config.get('email_notifications', {}).get('smtp_server', 'smtp.gmail.com'))
+        h_server.addWidget(self.input_smtp_server)
+        h_server.addWidget(QLabel("Port:"))
+        self.input_smtp_port = QSpinBox()
+        self.input_smtp_port.setRange(1, 65535)
+        self.input_smtp_port.setValue(self.config.get('email_notifications', {}).get('smtp_port', 587))
+        self.input_smtp_port.setMaximumWidth(80)
+        h_server.addWidget(self.input_smtp_port)
+        smtp_layout.addLayout(h_server)
+
+        smtp_layout.addWidget(QLabel("Sender Email:"))
+        self.input_sender_email = QLineEdit(self.config.get('email_notifications', {}).get('sender_email', ''))
+        self.input_sender_email.setPlaceholderText("your-email@gmail.com")
+        smtp_layout.addWidget(self.input_sender_email)
+
+        smtp_layout.addWidget(QLabel("Sender Password (App Password for Gmail):"))
+        self.input_sender_password = QLineEdit(self.config.get('email_notifications', {}).get('sender_password', ''))
+        self.input_sender_password.setEchoMode(QLineEdit.Password)
+        self.input_sender_password.setPlaceholderText("xxxx-xxxx-xxxx-xxxx")
+        smtp_layout.addWidget(self.input_sender_password)
+
+        smtp_layout.addWidget(QLabel("Recipient Email:"))
+        self.input_recipient_email = QLineEdit(self.config.get('email_notifications', {}).get('recipient_email', ''))
+        self.input_recipient_email.setPlaceholderText("notifications@example.com")
+        smtp_layout.addWidget(self.input_recipient_email)
+
+        email_layout.addLayout(smtp_layout)
+
+        # Alert Preferences
+        email_layout.addWidget(QLabel("Send Alerts For:"))
+        self.chk_alert_complete = QCheckBox("Batch Processing Completion")
+        self.chk_alert_complete.setChecked(self.config.get('email_notifications', {}).get('alert_on_complete', True))
+        email_layout.addWidget(self.chk_alert_complete)
+
+        self.chk_alert_error = QCheckBox("Critical Errors")
+        self.chk_alert_error.setChecked(self.config.get('email_notifications', {}).get('alert_on_error', True))
+        email_layout.addWidget(self.chk_alert_error)
+
+        self.chk_alert_ticker_failed = QCheckBox("Individual Ticker Failures")
+        self.chk_alert_ticker_failed.setChecked(self.config.get('email_notifications', {}).get('alert_on_ticker_failed', False))
+        email_layout.addWidget(self.chk_alert_ticker_failed)
+
+        # Test email button
+        btn_test_email = QPushButton("Test Email Configuration")
+        btn_test_email.setObjectName("SecondaryButton")
+        btn_test_email.clicked.connect(self.test_email_config)
+        email_layout.addWidget(btn_test_email)
+
+        layout.addWidget(grp_email)
+
         btn_save = QPushButton("Save Settings")
         btn_save.clicked.connect(self.save_settings)
         layout.addWidget(btn_save)
+
+        layout.addStretch()
 
         return tab
 
@@ -689,11 +1109,115 @@ class MainWindow(QMainWindow):
 
     # --- Logic ---
 
+    def _show_confirmation_dialog(self, tickers: List[str]) -> bool:
+        """Show confirmation dialog with all processing parameters."""
+        opts = self.get_options_from_ui()
+
+        filing_limit = opts.get('filing_limit')
+        filing_limit_text = "All Available" if filing_limit is None else str(filing_limit)
+
+        # Get selected AI models
+        ai_models = opts.get('ai_models', [])
+        ai_models_text = ', '.join(ai_models) if ai_models else self.combo_ai_model.currentText()
+
+        # Quick check for AI models - non-blocking
+        ai_warning = ""
+        if opts.get('ai_enabled'):
+            # Don't block UI with model checking - just show basic info
+            ai_warning = f"""
+<p style="color: #4da6ff;">ℹ️ AI Analysis Enabled</p>
+<p style="color: #4da6ff;">Models: {ai_models_text}</p>
+<p style="color: #888; font-size: 11px;">Model availability will be verified during processing</p>
+"""
+
+        msg = f"""
+<h3>Confirm Profile Generation</h3>
+<p>You are about to process <b>{len(tickers)}</b> ticker(s):</p>
+<p><b>{', '.join(tickers[:10])}</b>{'...' if len(tickers) > 10 else ''}</p>
+
+<h4>Parameters:</h4>
+<ul>
+<li><b>Lookback Years:</b> {opts.get('lookback_years')}</li>
+<li><b>Filing Limit:</b> {filing_limit_text}</li>
+<li><b>AI Models:</b> {ai_models_text}</li>
+<li><b>AI Analysis:</b> {'Enabled' if opts.get('ai_enabled') else 'Disabled'}</li>
+<li><b>Incremental Update:</b> {'Yes' if opts.get('incremental') else 'No'}</li>
+<li><b>Database:</b> {self.config['mongodb']['db_name']}</li>
+<li><b>Collection:</b> {self.config['collections']['profiles']}</li>
+</ul>
+
+{ai_warning}
+
+<p>Do you want to proceed?</p>
+        """
+
+        dlg = QMessageBox(self)
+        dlg.setWindowTitle("Confirm Processing")
+        dlg.setTextFormat(Qt.RichText)
+        dlg.setText(msg)
+        dlg.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+        dlg.setDefaultButton(QMessageBox.Yes)
+        dlg.setIcon(QMessageBox.Question)
+
+        # Make dialog application modal to prevent clicks underneath
+        dlg.setModal(True)
+
+        return dlg.exec() == QMessageBox.Yes
+
+        msg = f"""
+<h3>Confirm Profile Generation</h3>
+<p>You are about to process <b>{len(tickers)}</b> ticker(s):</p>
+<p><b>{', '.join(tickers[:10])}</b>{'...' if len(tickers) > 10 else ''}</p>
+
+<h4>Parameters:</h4>
+<ul>
+<li><b>Lookback Years:</b> {opts.get('lookback_years')}</li>
+<li><b>Filing Limit:</b> {filing_limit_text}</li>
+<li><b>AI Models:</b> {ai_models_text}</li>
+<li><b>AI Analysis:</b> {'Enabled' if opts.get('ai_enabled') else 'Disabled'}</li>
+<li><b>Incremental Update:</b> {'Yes' if opts.get('incremental') else 'No'}</li>
+<li><b>Database:</b> {self.config['mongodb']['db_name']}</li>
+<li><b>Collection:</b> {self.config['collections']['profiles']}</li>
+</ul>
+
+{ai_warning}
+
+<p>Do you want to proceed?</p>
+        """
+
+        dlg = QMessageBox(self)
+        dlg.setWindowTitle("Confirm Processing")
+        dlg.setTextFormat(Qt.RichText)
+        dlg.setText(msg)
+        dlg.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+        dlg.setDefaultButton(QMessageBox.Yes)
+        dlg.setIcon(QMessageBox.Question)
+
+        return dlg.exec() == QMessageBox.Yes
+
     def get_options_from_ui(self):
+        filing_limit_value = self.spin_filing_limit.value()
         opts = {
             'lookback_years': self.spin_lookback.value(),
-            'incremental': self.chk_incremental.isChecked()
+            'filing_limit': None if filing_limit_value == 0 else filing_limit_value,
+            'incremental': self.chk_incremental.isChecked(),
+            'ai_enabled': self.chk_ai_enabled.isChecked(),
+            'config': self.config  # Pass full config for AI analyzer
         }
+        # Update config with selected AI model
+        if 'profile_settings' not in self.config:
+            self.config['profile_settings'] = {}
+        self.config['profile_settings']['ai_model'] = self.combo_ai_model.currentText()
+
+        # Get selected models for multi-model analysis
+        selected_models = [model for model, chk in self.model_checks.items() if chk.isChecked()]
+        if len(selected_models) > 1:
+            opts['ai_models'] = selected_models  # Multiple models selected
+            self.log_message(f"Multi-model analysis enabled: {', '.join(selected_models)}")
+        elif len(selected_models) == 1:
+            opts['ai_models'] = selected_models  # Single model
+        # else: use default from combo_ai_model
+
         for k, chk in self.feature_checks.items():
             opts[f'include_{k}'] = chk.isChecked()
         return opts
@@ -749,6 +1273,10 @@ class MainWindow(QMainWindow):
                 tickers.append(ticker)
         
         if tickers:
+            # Show confirmation dialog with parameters
+            if not self._show_confirmation_dialog(tickers):
+                return
+
             # Add to queue table
             for ticker in tickers:
                 self._add_ticker_to_queue_table(ticker, TickerStatus.QUEUED.value)
@@ -793,7 +1321,11 @@ class MainWindow(QMainWindow):
         if not ident:
             QMessageBox.warning(self, "Input Error", "Please enter a ticker or CIK.")
             return
-        
+
+        # Show confirmation dialog
+        if not self._show_confirmation_dialog([ident]):
+            return
+
         self._add_ticker_to_queue_table(ident, TickerStatus.QUEUED.value)
         
         self.task_queue.put({
@@ -810,7 +1342,11 @@ class MainWindow(QMainWindow):
         if not idents:
             QMessageBox.warning(self, "Input Error", "Please enter at least one identifier.")
             return
-        
+
+        # Show confirmation dialog
+        if not self._show_confirmation_dialog(idents):
+            return
+
         for ident in idents:
             self._add_ticker_to_queue_table(ident, TickerStatus.QUEUED.value)
             
@@ -842,20 +1378,17 @@ class MainWindow(QMainWindow):
             tickers = [c.get('ticker', c.get('cik', '')) for c in selected if c.get('ticker') or c.get('cik')]
             
             if tickers:
-                # Add to queue table
+                # Add to processing queue (not immediate processing)
+                added = 0
                 for ticker in tickers:
-                    self._add_ticker_to_queue_table(ticker, TickerStatus.QUEUED.value)
-                
-                # Start processing
-                self.task_queue.put({
-                    'action': 'generate_profiles',
-                    'identifiers': tickers,
-                    'options': self.get_options_from_ui(),
-                    'collection': self.config['collections']['profiles']
-                })
-                
-                self.lbl_status.setText(f"Queued {len(tickers)} random tickers")
-                self.log_message(f"Added {len(tickers)} random tickers to queue")
+                    ticker = ticker.upper()  # Normalize to uppercase
+                    if ticker not in self.processing_queue:
+                        self.processing_queue.append(ticker)
+                        added += 1
+
+                self._update_queue_table()
+                self.lbl_status.setText(f"Added {added} random tickers to queue (skipped {len(tickers) - added} duplicates)")
+                self.log_message(f"Added {added} random tickers to queue")
             else:
                 QMessageBox.warning(self, "Error", "Could not extract tickers from selected companies.")
                 
@@ -884,20 +1417,17 @@ class MainWindow(QMainWindow):
             tickers = [c['ticker'] for c in selected]
             
             if tickers:
-                # Add to queue table
+                # Add to processing queue (not immediate processing)
+                added = 0
                 for ticker in tickers:
-                    self._add_ticker_to_queue_table(ticker, TickerStatus.QUEUED.value)
-                
-                # Start processing
-                self.task_queue.put({
-                    'action': 'generate_profiles',
-                    'identifiers': tickers,
-                    'options': self.get_options_from_ui(),
-                    'collection': self.config['collections']['profiles']
-                })
-                
-                self.lbl_status.setText(f"Queued top {len(tickers)} tickers")
-                self.log_message(f"Added top {len(tickers)} tickers to queue: {', '.join(tickers[:5])}...")
+                    ticker = ticker.upper()  # Normalize to uppercase
+                    if ticker not in self.processing_queue:
+                        self.processing_queue.append(ticker)
+                        added += 1
+
+                self._update_queue_table()
+                self.lbl_status.setText(f"Added {added} top tickers to queue (skipped {len(tickers) - added} duplicates)")
+                self.log_message(f"Added {added} top tickers to queue: {', '.join(tickers[:5])}...")
             else:
                 QMessageBox.warning(self, "Error", "Could not extract tickers from top companies.")
                 
@@ -909,11 +1439,168 @@ class MainWindow(QMainWindow):
         """Pause the selected ticker in queue."""
         selected_rows = self.queue_table.selectionModel().selectedRows()
         if not selected_rows:
+            QMessageBox.information(self, "No Selection", "Please select a ticker from the queue to pause.")
             return
         
         ticker = self.queue_table.item(selected_rows[0].row(), 0).text()
-        self.task_queue.put({'action': 'pause_ticker', 'ticker': ticker})
-        self.log_message(f"Pausing {ticker}...")
+        status = self.queue_table.item(selected_rows[0].row(), 1).text()
+
+        if status == TickerStatus.RUNNING.value:
+            self.task_queue.put({'action': 'pause_ticker', 'ticker': ticker})
+            self.log_message(f"Pausing {ticker}...")
+        else:
+            QMessageBox.information(self, "Cannot Pause", f"{ticker} is not currently running (Status: {status})")
+
+    # New Queue Management Methods
+
+    def add_single_to_queue(self):
+        """Add single ticker to processing queue without starting."""
+        ident = self.input_ticker.text().strip().upper()  # Normalize to uppercase
+        if not ident:
+            QMessageBox.warning(self, "Input Error", "Please enter a ticker or CIK.")
+            return
+
+        if ident not in self.processing_queue:
+            self.processing_queue.append(ident)
+            self._update_queue_table()
+            self.input_ticker.clear()
+            self.log_message(f"Added {ident} to queue")
+        else:
+            QMessageBox.information(self, "Already in Queue", f"{ident} is already in the processing queue.")
+
+    def add_batch_to_queue(self):
+        """Add batch of tickers to processing queue without starting."""
+        text = self.input_batch.toPlainText()
+        idents = [x.strip().upper() for x in text.replace('\n', ',').split(',') if x.strip()]  # Normalize to uppercase
+
+        if not idents:
+            QMessageBox.warning(self, "Input Error", "Please enter at least one identifier.")
+            return
+
+        added = 0
+        for ident in idents:
+            if ident not in self.processing_queue:
+                self.processing_queue.append(ident)
+                added += 1
+
+        self._update_queue_table()
+        self.input_batch.clear()
+        self.log_message(f"Added {added} ticker(s) to queue (skipped {len(idents) - added} duplicates)")
+
+    def add_selected_to_queue(self):
+        """Add selected tickers from search results to queue."""
+        selected_rows = self.search_results.selectionModel().selectedRows()
+        if not selected_rows:
+            QMessageBox.warning(self, "No Selection", "Please select at least one ticker from search results.")
+            return
+
+        added = 0
+        for row in selected_rows:
+            ticker = self.search_results.item(row.row(), 0).text().upper()  # Normalize to uppercase
+            if ticker not in self.processing_queue:
+                self.processing_queue.append(ticker)
+                added += 1
+
+        self._update_queue_table()
+        self.log_message(f"Added {added} ticker(s) to queue")
+
+    def remove_from_queue(self, ticker):
+        """Remove a ticker from the processing queue."""
+        if ticker in self.processing_queue:
+            self.processing_queue.remove(ticker)
+            self._update_queue_table()
+            self.log_message(f"Removed {ticker} from queue")
+
+    def clear_queue(self):
+        """Clear all tickers from processing queue."""
+        if not self.processing_queue:
+            return
+
+        reply = QMessageBox.question(
+            self,
+            "Clear Queue",
+            f"Clear all {len(self.processing_queue)} ticker(s) from the queue?",
+            QMessageBox.Yes | QMessageBox.No
+        )
+
+        if reply == QMessageBox.Yes:
+            self.processing_queue.clear()
+            self._update_queue_table()
+            self.log_message("Processing queue cleared")
+
+    def start_queue_processing(self):
+        """Start processing all tickers in the queue."""
+        if not self.processing_queue:
+            QMessageBox.warning(self, "Empty Queue", "No tickers in the processing queue.")
+            return
+
+        # Disable the button immediately to prevent double-clicks
+        self.btn_start_processing.setEnabled(False)
+        self.btn_start_processing.setText("Starting...")
+
+        # Process pending events to update UI immediately
+        QApplication.processEvents()
+
+        # Show confirmation dialog
+        confirmed = self._show_confirmation_dialog(self.processing_queue)
+
+        # Re-enable button
+        self.btn_start_processing.setText("Start Processing")
+        self.btn_start_processing.setEnabled(len(self.processing_queue) > 0)
+
+        if not confirmed:
+            return
+
+        # Mark all as processing
+        for ticker in self.processing_queue:
+            self._add_ticker_to_queue_table(ticker, TickerStatus.QUEUED.value)
+
+        # Switch to Queue Monitor tab
+        self.tabs.setCurrentIndex(1)  # Queue Monitor is tab index 1
+
+        # Start processing
+        self.task_queue.put({
+            'action': 'generate_profiles',
+            'identifiers': self.processing_queue.copy(),
+            'options': self.get_options_from_ui(),
+            'collection': self.config['collections']['profiles']
+        })
+
+        self.lbl_status.setText(f"Processing {len(self.processing_queue)} tickers...")
+        self.log_message(f"Started processing {len(self.processing_queue)} tickers from queue")
+
+        # Clear the queue after starting
+        self.processing_queue.clear()
+        self._update_queue_table()
+
+    def _update_queue_table(self):
+        """Update the dashboard queue table to show current queue status."""
+        self.dashboard_queue_table.setRowCount(0)
+
+        for ticker in self.processing_queue:
+            row = self.dashboard_queue_table.rowCount()
+            self.dashboard_queue_table.insertRow(row)
+
+            # Ticker
+            self.dashboard_queue_table.setItem(row, 0, QTableWidgetItem(ticker))
+
+            # Status
+            status_item = QTableWidgetItem("Queued")
+            status_item.setForeground(QColor("#ffc107"))  # Orange
+            self.dashboard_queue_table.setItem(row, 1, status_item)
+
+            # Remove button
+            btn_remove = QPushButton("Remove")
+            btn_remove.setObjectName("DangerButton")
+            btn_remove.clicked.connect(lambda checked, t=ticker: self.remove_from_queue(t))
+            self.dashboard_queue_table.setCellWidget(row, 2, btn_remove)
+
+        # Update count label
+        count = len(self.processing_queue)
+        self.lbl_queue_count.setText(f"{count} ticker{'s' if count != 1 else ''} in queue")
+
+        # Enable/disable start button
+        self.btn_start_processing.setEnabled(count > 0)
 
     def resume_selected_ticker(self):
         """Resume the selected ticker in queue."""
@@ -929,12 +1616,64 @@ class MainWindow(QMainWindow):
         """Cancel the selected ticker in queue."""
         selected_rows = self.queue_table.selectionModel().selectedRows()
         if not selected_rows:
+            QMessageBox.information(self, "No Selection", "Please select a ticker from the queue to cancel.")
             return
         
-        ticker = self.queue_table.item(selected_rows[0].row(), 0).text()
-        if QMessageBox.question(self, "Confirm", f"Cancel processing for {ticker}?") == QMessageBox.Yes:
-            self.task_queue.put({'action': 'cancel_ticker', 'ticker': ticker})
-            self.log_message(f"Cancelling {ticker}...")
+        row = selected_rows[0].row()
+        ticker = self.queue_table.item(row, 0).text()
+        status = self.queue_table.item(row, 1).text()
+
+        # Immediate cancellation without confirmation for better UX
+        # Send cancel signal to worker
+        self.task_queue.put({'action': 'cancel_ticker', 'ticker': ticker})
+
+        # Update UI immediately
+        status_item = self.queue_table.item(row, 1)
+        if status_item:
+            status_item.setText(TickerStatus.CANCELLED.value)
+            status_item.setForeground(QColor("#6c757d"))  # Gray
+
+        progress_item = self.queue_table.item(row, 2)
+        if progress_item:
+            progress_item.setText("0%")
+
+        self.log_message(f"Cancelling {ticker}...")
+
+    def cancel_all_tickers(self):
+        """Cancel all tickers in the queue."""
+        if self.queue_table.rowCount() == 0:
+            QMessageBox.information(self, "Empty Queue", "No tickers to cancel.")
+            return
+
+        reply = QMessageBox.question(
+            self,
+            "Confirm Cancel All",
+            f"Are you sure you want to cancel all {self.queue_table.rowCount()} ticker(s)?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+
+        if reply == QMessageBox.Yes:
+            # Send cancel all signal
+            self.task_queue.put({'action': 'cancel_all'})
+
+            # Update all rows in UI
+            for row in range(self.queue_table.rowCount()):
+                ticker = self.queue_table.item(row, 0).text()
+                status = self.queue_table.item(row, 1).text()
+
+                # Only cancel if not already completed or failed
+                if status not in [TickerStatus.COMPLETED.value, TickerStatus.FAILED.value]:
+                    status_item = self.queue_table.item(row, 1)
+                    if status_item:
+                        status_item.setText(TickerStatus.CANCELLED.value)
+                        status_item.setForeground(QColor("#6c757d"))  # Gray
+
+                    progress_item = self.queue_table.item(row, 2)
+                    if progress_item:
+                        progress_item.setText("0%")
+
+            self.log_message(f"Cancelling all {self.queue_table.rowCount()} tickers...")
 
     def retry_failed_ticker(self):
         """Retry a failed ticker."""
@@ -965,11 +1704,19 @@ class MainWindow(QMainWindow):
                 self.profiles_table.insertRow(row)
                 
                 info = p.get('company_info', {})
+                meta = p.get('filing_metadata', {})
+
                 self.profiles_table.setItem(row, 0, QTableWidgetItem(info.get('ticker', 'N/A')))
                 self.profiles_table.setItem(row, 1, QTableWidgetItem(info.get('name', 'N/A')))
                 self.profiles_table.setItem(row, 2, QTableWidgetItem(str(p.get('cik', 'N/A'))))
                 self.profiles_table.setItem(row, 3, QTableWidgetItem(str(p.get('generated_at', ''))[:19]))
                 
+                # Add period information
+                oldest_filing = meta.get('oldest_filing', 'N/A')
+                most_recent = meta.get('most_recent_filing', 'N/A')
+                self.profiles_table.setItem(row, 4, QTableWidgetItem(str(oldest_filing)[:10]))
+                self.profiles_table.setItem(row, 5, QTableWidgetItem(str(most_recent)[:10]))
+
             self.lbl_profiles_db.setText(f"Profiles in DB: {len(profiles)}")
         except Exception as e:
             self.log_message(f"Error loading profiles: {e}")
@@ -1042,47 +1789,298 @@ class MainWindow(QMainWindow):
         except Exception as e:
             QMessageBox.critical(dlg, "Error", f"Invalid JSON: {e}")
 
-    def visualize_profile(self):
-        """NEW: Open visualization window for selected profile."""
+    def edit_profile_period(self):
+        """Open dialog to edit profile period and regenerate."""
         rows = self.profiles_table.selectionModel().selectedRows()
         if not rows:
-            QMessageBox.warning(self, "No Selection", "Please select a profile to visualize.")
+            QMessageBox.warning(self, "No Selection", "Please select a profile to edit period.")
             return
-        
-        cik = self.profiles_table.item(rows[0].row(), 2).text()
-        col_name = self.config['collections']['profiles']
-        profile = self.mongo.find_one(col_name, {'cik': cik})
-        
-        if not profile:
-            QMessageBox.warning(self, "Not Found", f"Profile for CIK {cik} not found.")
-            return
-        
+
+        row = rows[0].row()
+        ticker = self.profiles_table.item(row, 0).text()
+        cik = self.profiles_table.item(row, 2).text()
+        period_from = self.profiles_table.item(row, 4).text() if self.profiles_table.item(row, 4) else "1995-01-01"
+        period_to = self.profiles_table.item(row, 5).text() if self.profiles_table.item(row, 5) else "2025-12-03"
+
         try:
-            from visualization_window import ProfileVisualizationWindow
-            viz_window = ProfileVisualizationWindow(profile, self.config, self)
-            viz_window.exec()
+            from profile_period_editor import ProfilePeriodEditorDialog
+
+            dialog = ProfilePeriodEditorDialog(ticker, cik, period_from, period_to, self)
+            dialog.period_updated.connect(self.handle_period_update)
+            dialog.exec()
+
         except Exception as e:
-            QMessageBox.critical(self, "Visualization Error", f"Failed to open visualization: {e}")
-            logger.exception("Visualization error")
+            QMessageBox.critical(self, "Error", f"Failed to open period editor: {e}")
+            logger.exception("Error opening period editor")
+
+    def handle_period_update(self, ticker, from_date, to_date, incremental):
+        """Handle profile period update request."""
+        self.log_message(f"Updating profile period for {ticker}: {from_date} to {to_date} ({'incremental' if incremental else 'full'})")
+
+        # Calculate lookback years from dates
+        from datetime import datetime
+        try:
+            from_dt = datetime.strptime(from_date, "%Y-%m-%d")
+            to_dt = datetime.strptime(to_date, "%Y-%m-%d")
+            lookback_years = (to_dt - from_dt).days // 365
+        except:
+            lookback_years = 10
+
+        # Get current options and override period-specific ones
+        options = self.get_options_from_ui()
+        options['lookback_years'] = max(1, lookback_years)
+        options['incremental'] = incremental
+
+        # Add to queue and process
+        self.task_queue.put({
+            'action': 'generate_profiles',
+            'identifiers': [ticker],
+            'options': options,
+            'collection': self.config['collections']['profiles']
+        })
+
+        self.lbl_status.setText(f"Updating profile for {ticker} ({from_date} to {to_date})")
+        QMessageBox.information(self, "Profile Update Started",
+                              f"Profile update for {ticker} has been queued.\n\n"
+                              f"Period: {from_date} to {to_date}\n"
+                              f"Mode: {'Incremental' if incremental else 'Full Regeneration'}")
+
+    def visualize_profile(self):
+        """NEW: Open visualization window for selected profile(s)."""
+        rows = self.profiles_table.selectionModel().selectedRows()
+        if not rows:
+            QMessageBox.warning(self, "No Selection", "Please select at least one profile to visualize.")
+            return
+        
+        col_name = self.config['collections']['profiles']
+
+        # Visualize each selected profile
+        for row in rows:
+            cik = self.profiles_table.item(row.row(), 2).text()
+            profile = self.mongo.find_one(col_name, {'cik': cik})
+
+            if not profile:
+                QMessageBox.warning(self, "Not Found", f"Profile for CIK {cik} not found.")
+                continue
+
+            try:
+                from visualization_window import ProfileVisualizationWindow
+                viz_window = ProfileVisualizationWindow(profile, self.config, self)
+                viz_window.exec()
+            except Exception as e:
+                QMessageBox.critical(self, "Visualization Error", f"Failed to open visualization for {cik}: {e}")
+                logger.exception("Visualization error")
 
     def delete_profile(self):
-        """Delete selected profile."""
+        """Delete selected profile(s)."""
         rows = self.profiles_table.selectionModel().selectedRows()
         if not rows:
+            QMessageBox.warning(self, "No Selection", "Please select at least one profile to delete.")
             return
-            
-        cik = self.profiles_table.item(rows[0].row(), 2).text()
-        if QMessageBox.question(self, "Confirm", f"Delete profile for {cik}?") == QMessageBox.Yes:
+
+        # Get all selected CIKs
+        ciks = [self.profiles_table.item(row.row(), 2).text() for row in rows]
+
+        # Confirm deletion
+        if len(ciks) == 1:
+            msg = f"Delete profile for {ciks[0]}?"
+        else:
+            msg = f"Delete {len(ciks)} selected profiles?\n\n" + ", ".join(ciks[:5])
+            if len(ciks) > 5:
+                msg += f"\n...and {len(ciks) - 5} more"
+
+        if QMessageBox.question(self, "Confirm Deletion", msg,
+                              QMessageBox.Yes | QMessageBox.No) == QMessageBox.Yes:
             col_name = self.config['collections']['profiles']
-            self.mongo.delete_one(col_name, {'cik': cik})
+            deleted = 0
+            for cik in ciks:
+                try:
+                    self.mongo.delete_one(col_name, {'cik': cik})
+                    self.log_message(f"Deleted profile {cik}")
+                    deleted += 1
+                except Exception as e:
+                    logger.exception(f"Error deleting profile {cik}")
+
+            QMessageBox.information(self, "Deletion Complete", f"Deleted {deleted} profile(s).")
+            self.load_profiles()
             self.log_message(f"Deleted profile {cik}")
             self.load_profiles()
 
     def save_settings(self):
         self.config['mongodb']['uri'] = self.input_mongo_uri.text()
         self.config['mongodb']['db_name'] = self.input_mongo_db.text()
+
+        # Save email settings
+        if 'email_notifications' not in self.config:
+            self.config['email_notifications'] = {}
+
+        self.config['email_notifications']['enabled'] = self.chk_email_enabled.isChecked()
+        self.config['email_notifications']['smtp_server'] = self.input_smtp_server.text()
+        self.config['email_notifications']['smtp_port'] = self.input_smtp_port.value()
+        self.config['email_notifications']['sender_email'] = self.input_sender_email.text()
+        self.config['email_notifications']['sender_password'] = self.input_sender_password.text()
+        self.config['email_notifications']['recipient_email'] = self.input_recipient_email.text()
+        self.config['email_notifications']['alert_on_complete'] = self.chk_alert_complete.isChecked()
+        self.config['email_notifications']['alert_on_error'] = self.chk_alert_error.isChecked()
+        self.config['email_notifications']['alert_on_ticker_failed'] = self.chk_alert_ticker_failed.isChecked()
+
         self.config_manager.save_config()
-        QMessageBox.information(self, "Saved", "Settings saved. Restart application to apply connection changes.")
+        QMessageBox.information(self, "Saved", "Settings saved successfully. Email notifications will be used in next processing batch.")
+
+    def test_email_config(self):
+        """Test email configuration by sending a test email."""
+        try:
+            from email_notifier import EmailNotifier
+
+            # Create temporary config with current UI values
+            test_config = {
+                'email_notifications': {
+                    'enabled': self.chk_email_enabled.isChecked(),
+                    'smtp_server': self.input_smtp_server.text(),
+                    'smtp_port': self.input_smtp_port.value(),
+                    'sender_email': self.input_sender_email.text(),
+                    'sender_password': self.input_sender_password.text(),
+                    'recipient_email': self.input_recipient_email.text(),
+                    'alert_on_complete': True,
+                    'alert_on_error': True,
+                    'alert_on_ticker_failed': False
+                }
+            }
+
+            notifier = EmailNotifier(test_config)
+
+            # Test connection
+            self.log_message("Testing email connection...")
+            if notifier.test_connection():
+                self.log_message("✓ Email connection successful!")
+
+                # Send test email
+                test_results = {
+                    'total': 3,
+                    'successful': 2,
+                    'failed': 1,
+                    'tickers': ['AAPL', 'MSFT'],
+                    'failed_tickers': ['TEST'],
+                    'start_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                    'end_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                    'duration': '0:05:30',
+                    'database': 'Entities',
+                    'collection': 'profiles'
+                }
+
+                notifier.send_completion_report(test_results)
+                self.log_message("✓ Test email sent!")
+                QMessageBox.information(self, "Success",
+                    "Email configuration is working!\n\n"
+                    "A test completion report has been sent to:\n"
+                    f"{self.input_recipient_email.text()}\n\n"
+                    "Check your inbox (and spam folder).")
+            else:
+                self.log_message("✗ Email connection failed!")
+                QMessageBox.warning(self, "Connection Failed",
+                    "Could not connect to SMTP server.\n\n"
+                    "Please check:\n"
+                    "- SMTP server and port are correct\n"
+                    "- Email and password are valid\n"
+                    "- For Gmail, use App Password (not regular password)\n"
+                    "- Firewall allows SMTP connection")
+
+        except Exception as e:
+            logger.exception("Email test failed")
+            self.log_message(f"✗ Email test error: {e}")
+            QMessageBox.critical(self, "Error", f"Email test failed:\n\n{str(e)}")
+
+    def open_model_manager(self):
+        """Open the Ollama Model Manager dialog."""
+        try:
+            # Show immediate feedback
+            self.lbl_status.setText("Opening Model Manager...")
+            self.log_message("Opening Ollama Model Manager...")
+
+            # Import and create dialog
+            from ollama_manager_dialog import OllamaManagerDialog
+            dialog = OllamaManagerDialog(self)
+
+            # Connect signal to update AI model dropdown when model is downloaded
+            dialog.model_downloaded.connect(self.on_model_downloaded)
+
+            # Reset status
+            self.lbl_status.setText("Status: Ready")
+
+            # Show dialog
+            dialog.exec()
+
+            # Refresh Ollama status after closing dialog
+            self._check_ollama_status()
+
+        except Exception as e:
+            self.lbl_status.setText("Status: Ready")
+            QMessageBox.critical(self, "Error", f"Failed to open Model Manager: {e}")
+            logger.exception("Error opening model manager")
+
+    def on_model_downloaded(self, model_name: str):
+        """Called when a model is successfully downloaded."""
+        self.log_message(f"Model '{model_name}' is now available for AI analysis")
+
+        # Update the combo box if the model isn't already there
+        if self.combo_ai_model.findText(model_name) == -1:
+            self.combo_ai_model.addItem(model_name)
+
+        # Refresh Ollama status
+        self._check_ollama_status()
+
+    def _check_ollama_status(self):
+        """Check Ollama status and update the status indicator."""
+        try:
+            from ollama_model_manager import OllamaModelManager
+            manager = OllamaModelManager()
+
+            if manager.is_ollama_running():
+                models = manager.get_installed_models()
+                model_count = len(models)
+
+                if model_count > 0:
+                    self.lbl_ollama_status.setText(f"Ollama: ✓ Running ({model_count} models)")
+                    # White text on green background - inline style with !important doesn't work in Qt,
+                    # so we set the full style including all properties
+                    self.lbl_ollama_status.setStyleSheet(
+                        "QPushButton#OllamaStatusButton { "
+                        "background-color: #198754; color: white; font-weight: bold; "
+                        "padding: 5px 10px; border-radius: 4px; border: none; }"
+                        "QPushButton#OllamaStatusButton:hover { "
+                        "background-color: #157347; }"
+                    )
+                else:
+                    self.lbl_ollama_status.setText("Ollama: ⚠ Running (No models)")
+                    # Dark text on orange background
+                    self.lbl_ollama_status.setStyleSheet(
+                        "QPushButton#OllamaStatusButton { "
+                        "background-color: #ffc107; color: #000; font-weight: bold; "
+                        "padding: 5px 10px; border-radius: 4px; border: none; }"
+                        "QPushButton#OllamaStatusButton:hover { "
+                        "background-color: #ffca2c; }"
+                    )
+            else:
+                self.lbl_ollama_status.setText("Ollama: ✗ Not Running")
+                # White text on red background
+                self.lbl_ollama_status.setStyleSheet(
+                    "QPushButton#OllamaStatusButton { "
+                    "background-color: #dc3545; color: white; font-weight: bold; "
+                    "padding: 5px 10px; border-radius: 4px; border: none; }"
+                    "QPushButton#OllamaStatusButton:hover { "
+                    "background-color: #bb2d3b; }"
+                )
+        except Exception as e:
+            self.lbl_ollama_status.setText("Ollama: ? Unknown")
+            # White text on gray background (default from global stylesheet)
+            self.lbl_ollama_status.setStyleSheet(
+                "QPushButton#OllamaStatusButton { "
+                "background-color: #6c757d; color: white; font-weight: bold; "
+                "padding: 5px 10px; border-radius: 4px; border: none; }"
+                "QPushButton#OllamaStatusButton:hover { "
+                "background-color: #5c636a; }"
+            )
+            logger.error(f"Error checking Ollama status: {e}")
 
     # --- Worker Handlers ---
     @Slot(str, str, str)
@@ -1120,12 +2118,6 @@ class MainWindow(QMainWindow):
     def update_stats_ui(self, stats):
         self.lbl_total_companies.setText(f"Total Companies: {stats.get('total_companies', 'N/A')}")
 
-    def log_message(self, msg):
-        ts = datetime.now().strftime("%H:%M:%S")
-        self.log_text.append(f"[{ts}] {msg}")
-        # Auto scroll
-        sb = self.log_text.verticalScrollBar()
-        sb.setValue(sb.maximum())
 
 def main():
     app = QApplication(sys.argv)

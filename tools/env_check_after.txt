@@ -1,0 +1,114 @@
+﻿PYTHON: D:\development project\Fundamental_Data_Pipeline\.venv\Scripts\python.exe
+Python version: 3.13.9
+Platform: Windows-11-10.0.26200-SP0
+Architecture: ('64bit', 'WindowsPE')
+sys.prefix: D:\development project\Fundamental_Data_Pipeline\.venv
+sys.path[0:5]:
+   D:\development project\Fundamental_Data_Pipeline\tools
+   C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.2544.0_x64__qbz5n2kfra8p0\python313.zip
+   C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.2544.0_x64__qbz5n2kfra8p0\DLLs
+   C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.2544.0_x64__qbz5n2kfra8p0\Lib
+   C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.2544.0_x64__qbz5n2kfra8p0
+
+--- pip show PyQt5 / PyQtChart / PySide6 ---
+
+PyQt5: NOT INSTALLED (or pip show failed)
+
+PyQtChart: NOT INSTALLED (or pip show failed)
+
+PySide6 info:
+ Name: PySide6
+Version: 6.10.1
+Summary: Python bindings for the Qt cross-platform application and UI framework
+Home-page: https://pyside.org
+Author: 
+Author-email: Qt for Python Team <pyside@qt-project.org>
+License: LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+Location: D:\development project\Fundamental_Data_Pipeline\.venv\Lib\site-packages
+Requires: PySide6_Addons, PySide6_Essentials, shiboken6
+Required-by: 
+
+
+--- Import tests with tracebacks ---
+
+== Trying import: PySide6 ==
+PySide6 package at D:\development project\Fundamental_Data_Pipeline\.venv\Lib\site-packages\PySide6\__init__.py
+  PySide6.QtWidgets import OK
+  PySide6.QtCore import OK
+
+== Trying import: PyQt5 ==
+PyQt5 package at None
+  Submodule import failed:
+
+--- site-packages listing for PyQt5 / PySide6 ---
+site-packages: D:\development project\Fundamental_Data_Pipeline\.venv\Lib\site-packages
+
+Listing D:\development project\Fundamental_Data_Pipeline\.venv\Lib\site-packages\PyQt5
+D:\development project\Fundamental_Data_Pipeline\.venv\Lib\site-packages\PyQt5
+
+Listing D:\development project\Fundamental_Data_Pipeline\.venv\Lib\site-packages\PyQtChart
+  Not present
+
+Listing D:\development project\Fundamental_Data_Pipeline\.venv\Lib\site-packages\PySide6
+D:\development project\Fundamental_Data_Pipeline\.venv\Lib\site-packages\PySide6
+   assistant.exe
+   avcodec-61.dll
+   avformat-61.dll
+   avutil-59.dll
+   balsam.exe
+   balsamui.exe
+   concrt140.dll
+   designer.exe
+   linguist.exe
+   lrelease.exe
+   lupdate.exe
+   msvcp140.dll
+   msvcp140_1.dll
+   msvcp140_2.dll
+   msvcp140_codecvt_ids.dll
+   opengl32sw.dll
+   py.typed
+   pyside6.abi3.dll
+   pyside6.abi3.lib
+   pyside6qml.abi3.dll
+   pyside6qml.abi3.lib
+   PySide6_Addons.json
+   PySide6_Essentials.json
+   qmlcachegen.exe
+   qmlformat.exe
+   qmlimportscanner.exe
+   qmllint.exe
+   qmlls.exe
+   qmltyperegistrar.exe
+   qsb.exe
+   Qt3DAnimation.pyd
+   Qt3DAnimation.pyi
+   Qt3DCore.pyd
+   Qt3DCore.pyi
+   Qt3DExtras.pyd
+   Qt3DExtras.pyi
+   Qt3DInput.pyd
+   Qt3DInput.pyi
+   Qt3DLogic.pyd
+   Qt3DLogic.pyi
+   Qt3DRender.pyd
+   Qt3DRender.pyi
+   Qt63DAnimation.dll
+   Qt63DCore.dll
+   Qt63DExtras.dll
+   Qt63DInput.dll
+   Qt63DLogic.dll
+   Qt63DQuick.dll
+   Qt63DQuickAnimation.dll
+   Qt63DQuickExtras.dll
+
+--- Potential Qt DLLs under site-packages ---
+   PyQt5
+   PyQt5_Qt5-5.15.2.dist-info
+   PyQtChart_Qt5-5.15.2.dist-info
+   PySide6
+   pyside6-6.10.1.dist-info
+   pyside6_addons-6.10.1.dist-info
+   pyside6_essentials-6.10.1.dist-info
+
+Done

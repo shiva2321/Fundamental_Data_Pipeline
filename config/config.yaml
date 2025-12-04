@@ -9,6 +9,16 @@ collections:
   minute_data: minutebyminute
   profiles: profiles
   sentiment: sentiment
+email_notifications:
+  alert_on_complete: true
+  alert_on_error: true
+  alert_on_ticker_failed: false
+  enabled: false
+  recipient_email: ''
+  sender_email: ''
+  sender_password: ''
+  smtp_port: 587
+  smtp_server: smtp.gmail.com
 general:
   default_output_dir: reports
   max_threads: 5
@@ -18,6 +28,9 @@ mongodb:
   db_name: Entities
   uri: mongodb://localhost:27017
 profile_settings:
+  ai_enabled: true
+  ai_model: llama3.2
+  filing_limit: null
   included_features:
     anomalies: true
     growth: true
@@ -32,6 +45,19 @@ profile_settings:
   lookback_years: 10
 rate_limits:
   polygon: 120
+ui_settings:
+  dashboard_splitter_sizes:
+  - 641
+  - 924
+  main_splitter_sizes:
+  - 1214
+  - 143
+  splitter_sizes: []
+  window_geometry:
+    height: 1340
+    width: 1609
+    x: 113
+    y: 89
 update_frequency:
   fundamentals: DAILY
   institutional: QUARTERLY

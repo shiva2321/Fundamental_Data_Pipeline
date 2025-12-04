@@ -52,6 +52,39 @@ class Config:
                 "fundamentals": "fundamentals",
                 "sentiment": "sentiment"
             },
+            "profile_settings": {  # Profile generation settings
+                "lookback_years": 10,
+                "filing_limit": None,  # None = all available filings
+                "incremental_updates": False,
+                "ai_model": "llama3.2",  # Default AI model (llama3.2, mistral, etc.)
+                "ai_enabled": True,  # Enable AI analysis during profile generation
+                "included_features": {
+                    "ratios": True,
+                    "growth": True,
+                    "summary": True,
+                    "trends": True,
+                    "health": True,
+                    "volatility": True,
+                    "lifecycle": True,
+                    "anomalies": True,
+                    "ml_features": True
+                }
+            },
+            "ui_settings": {  # UI layout persistence
+                "splitter_sizes": [],  # Will store splitter sizes
+                "window_geometry": {}  # Will store window position and size
+            },
+            "email_notifications": {  # Email notification settings
+                "enabled": False,
+                "smtp_server": "smtp.gmail.com",
+                "smtp_port": 587,
+                "sender_email": "",
+                "sender_password": "",
+                "recipient_email": "",
+                "alert_on_complete": True,
+                "alert_on_error": True,
+                "alert_on_ticker_failed": False
+            },
             "rate_limits": {
                 "polygon": int(os.environ.get("POLYGON_RATE_LIMIT", "120")),
             },

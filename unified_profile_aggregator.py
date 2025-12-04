@@ -122,7 +122,11 @@ class UnifiedSECProfileAggregator:
 
         # Prepare financial metrics list (allow user override)
         default_metrics = [
-            "Revenues", "Assets", "Liabilities", "StockholdersEquity",
+            "Revenues",
+            "RevenueFromContractWithCustomerExcludingAssessedTax",  # Alternative revenue field
+            "RevenueFromContractWithCustomer",  # Another common alternative
+            "SalesRevenueNet",  # Another alternative
+            "Assets", "Liabilities", "StockholdersEquity",
             "NetIncomeLoss", "CashAndCashEquivalentsAtCarryingValue",
             "OperatingIncomeLoss", "GrossProfit", "EarningsPerShareBasic",
             "EarningsPerShareDiluted", "CommonStockSharesOutstanding"
@@ -132,6 +136,72 @@ class UnifiedSECProfileAggregator:
             log('info', f"Using user-specified metrics: {financial_metrics}")
         else:
             financial_metrics = default_metrics
+
+        # === SECTION 1.5: Material Events (8-K Filings) ===
+        log('info', "Parsing material events from 8-K filings")
+        try:
+            from form_8k_parser import Form8KParser
+            parser_8k = Form8KParser()
+            material_events = parser_8k.parse_8k_filings(filings)
+            profile["material_events"] = material_events
+            log('info', f"Parsed {material_events['total_8k_count']} 8-K filings, {material_events['recent_count']} recent events")
+        except Exception as e:
+            logger.warning(f"Could not parse 8-K filings: {e}")
+            profile["material_events"] = {
+                'total_8k_count': 0,
+                'recent_count': 0,
+                'events': [],
+                'risk_flags': [],
+                'positive_catalysts': []
+            }
+
+        # === SECTION 1.6: Corporate Governance (DEF 14A Filings) ===
+        log('info', "Parsing corporate governance from DEF 14A filings")
+        try:
+            from def14a_parser import DEF14AParser
+            parser_def14a = DEF14AParser()
+            governance_data = parser_def14a.parse_def14a_filings(filings)
+            profile["corporate_governance"] = governance_data
+            log('info', f"Parsed {governance_data['total_proxy_count']} proxy statements, governance score: {governance_data.get('governance_score', 'N/A')}")
+        except Exception as e:
+            logger.warning(f"Could not parse DEF 14A filings: {e}")
+            profile["corporate_governance"] = {
+                'total_proxy_count': 0,
+                'governance_score': None,
+                'insights': []
+            }
+
+        # === SECTION 1.7: Insider Trading (Form 4 Filings) ===
+        log('info', "Parsing insider trading from Form 4 filings")
+        try:
+            from form4_parser import Form4Parser
+            parser_form4 = Form4Parser()
+            insider_data = parser_form4.parse_form4_filings(filings)
+            profile["insider_trading"] = insider_data
+            log('info', f"Parsed {insider_data['total_form4_count']} Form 4 filings, sentiment: {insider_data.get('sentiment', 'N/A')}")
+        except Exception as e:
+            logger.warning(f"Could not parse Form 4 filings: {e}")
+            profile["insider_trading"] = {
+                'total_form4_count': 0,
+                'sentiment': 'No data',
+                'insights': []
+            }
+
+        # === SECTION 1.8: Institutional Ownership (SC 13D/G Filings) ===
+        log('info', "Parsing institutional ownership from SC 13D/G filings")
+        try:
+            from sc13_parser import SC13Parser
+            parser_sc13 = SC13Parser()
+            ownership_data = parser_sc13.parse_sc13_filings(filings)
+            profile["institutional_ownership"] = ownership_data
+            log('info', f"Parsed {ownership_data['total_sc13_count']} SC 13 filings, activist count: {ownership_data.get('activist_count', 0)}")
+        except Exception as e:
+            logger.warning(f"Could not parse SC 13 filings: {e}")
+            profile["institutional_ownership"] = {
+                'total_sc13_count': 0,
+                'activist_count': 0,
+                'insights': []
+            }
 
         # === SECTION 2: Financial Data ===
         log('info', "Extracting financial time series")
@@ -150,7 +220,11 @@ class UnifiedSECProfileAggregator:
             log('info', 'Merged new financial time series into existing profile')
 
         profile["financial_time_series"] = dict(financials)
-        profile["latest_financials"] = self._extract_latest_values(financials)
+
+        # Consolidate alternative revenue fields into "Revenues"
+        self._consolidate_revenue_fields(profile["financial_time_series"])
+
+        profile["latest_financials"] = self._extract_latest_values(profile["financial_time_series"])
 
         # === SECTION 3: Financial Ratios ===
         if opts.get('include_ratios', True):
@@ -226,6 +300,63 @@ class UnifiedSECProfileAggregator:
             profile["ml_features"] = {}
             log('info', "Skipping ML feature vector (user option)")
 
+         # === SECTION 12: AI/ML Analysis ===
+        if opts.get('ai_enabled', True):
+            try:
+                log('info', "Performing AI/ML analysis on profile")
+                from ai_analyzer import AIAnalyzer
+                ai_analyzer = AIAnalyzer(opts.get('config', {}))
+                # Check if multi-model analysis is requested
+                selected_models = opts.get('ai_models', [])
+                if len(selected_models) > 1:
+                    # Multi-model analysis
+                    log('info', f"Multi-model analysis with: {', '.join(selected_models)}")
+                    profile["ai_analysis_multi"] = {}
+
+                    for model in selected_models:
+                        try:
+                            log('info', f"Analyzing with model: {model}")
+                            # Temporarily set the model in config
+                            original_model = opts.get('config', {}).get('profile_settings', {}).get('ai_model')
+                            opts['config']['profile_settings']['ai_model'] = model
+
+                            # Analyze with this model
+                            analysis = ai_analyzer.analyze_profile(profile)
+                            profile["ai_analysis_multi"][model] = analysis
+
+                            # Restore original model
+                            if original_model:
+                                opts['config']['profile_settings']['ai_model'] = original_model
+
+                            log('info', f"Analysis with {model} completed")
+                        except Exception as model_error:
+                            log('info', f"Analysis with {model} failed: {model_error}")
+                            profile["ai_analysis_multi"][model] = {'error': str(model_error)}
+
+                    # Set primary analysis to first model's result
+                    first_model = selected_models[0]
+                    profile["ai_analysis"] = profile["ai_analysis_multi"].get(first_model, {})
+                    log('info', f"Multi-model analysis completed with {len(selected_models)} models")
+                else:
+                    # Single model analysis (default behavior)
+                    profile["ai_analysis"] = ai_analyzer.analyze_profile(profile)
+
+                    # Log the provider used
+                    provider = profile["ai_analysis"].get('provider', 'unknown') if profile["ai_analysis"] else 'none'
+                    if provider == 'ollama':
+                        model = profile["ai_analysis"].get('model', 'unknown')
+                        log('info', f"AI/ML analysis completed using Ollama model: {model}")
+                    elif provider == 'rule_based':
+                        log('info', "AI/ML analysis completed using rule-based fallback (Ollama unavailable)")
+                    else:
+                        log('info', "AI/ML analysis completed successfully")
+            except Exception as e:
+                log('info', f"AI/ML analysis failed: {e}")
+                profile["ai_analysis"] = None
+        else:
+            profile["ai_analysis"] = None
+            log('info', "Skipping AI/ML analysis (user option)")
+
         # Store the unified profile if output_collection provided
         if output_collection:
             try:
@@ -274,7 +405,11 @@ class UnifiedSECProfileAggregator:
             cik: str,
             metrics: Optional[List[str]] = None
     ) -> Dict[str, Dict[str, float]]:
-        """Extract financial time series data from filings."""
+        """
+        Extract financial time series data.
+        Uses BOTH direct API extraction AND filing parsing, then merges the results.
+        This ensures we get revenue data AND all filing data.
+        """
         financial_metrics = metrics or [
             "Revenues", "Assets", "Liabilities", "StockholdersEquity",
             "NetIncomeLoss", "CashAndCashEquivalentsAtCarryingValue",
@@ -282,9 +417,12 @@ class UnifiedSECProfileAggregator:
             "EarningsPerShareDiluted", "CommonStockSharesOutstanding"
         ]
 
+        # METHOD 1: Extract from filings first (gets ALL filing data)
+        logger.info(f"Extracting financial data from {len(filings)} filings for CIK {cik}")
         financials = defaultdict(dict)
+
         for f in filings:
-            filing_date = f.get("filingDate")
+            filing_date = f.get("filingDate") or f.get("reportDate")
             if not filing_date:
                 continue
 
@@ -295,7 +433,53 @@ class UnifiedSECProfileAggregator:
                     except (ValueError, TypeError):
                         logger.debug(f"Could not convert {key} to float for CIK {cik}")
 
-        return financials
+        logger.info(f"Extracted {len(financials)} metrics from {len(filings)} filings")
+
+        # METHOD 2: Supplement with direct API extraction (more reliable for revenue)
+        logger.info(f"Supplementing with direct API extraction for CIK {cik}")
+        try:
+            financials_from_api = self.sec_client.get_financial_metrics_timeseries(cik)
+
+            if financials_from_api:
+                # Merge API data with filing data (API data takes precedence for revenue)
+                for metric, api_data in financials_from_api.items():
+                    if api_data:
+                        # For Revenues, use API data (more reliable)
+                        if metric == 'Revenues':
+                            logger.info(f"Using API revenue data: {len(api_data)} periods")
+                            financials[metric] = dict(api_data)
+                        else:
+                            # For other metrics, merge (prefer filing data if more complete)
+                            if metric not in financials or len(api_data) > len(financials.get(metric, {})):
+                                financials[metric] = dict(api_data)
+                                logger.info(f"Using API data for {metric}: {len(api_data)} periods")
+                            else:
+                                logger.info(f"Keeping filing data for {metric}: {len(financials[metric])} periods")
+        except Exception as e:
+            logger.warning(f"API extraction failed: {e}, using filing data only")
+
+        logger.info(f"Final result: {len(financials)} metrics total")
+        return dict(financials)
+
+    def _consolidate_revenue_fields(self, financials: Dict[str, Dict[str, float]]) -> None:
+        """Consolidate alternative revenue field names into 'Revenues'."""
+        # Alternative revenue field names used by different companies
+        alt_revenue_fields = [
+            "RevenueFromContractWithCustomerExcludingAssessedTax",
+            "RevenueFromContractWithCustomer",
+            "SalesRevenueNet"
+        ]
+
+        # If Revenues doesn't exist or is empty, try alternatives
+        if not financials.get("Revenues") or len(financials.get("Revenues", {})) == 0:
+            for alt_field in alt_revenue_fields:
+                if alt_field in financials and financials[alt_field]:
+                    logger.info(f"Consolidating {alt_field} into Revenues field")
+                    financials["Revenues"] = financials[alt_field]
+                    break
+
+        # Also consolidate in latest_financials later by checking alternative fields
+        # This ensures revenue data is available under the standard "Revenues" key
 
     def _extract_latest_values(self, financials: Dict[str, Dict[str, float]]) -> Dict[str, Any]:
         """Extract the most recent values for each metric."""
@@ -370,7 +554,7 @@ class UnifiedSECProfileAggregator:
 
             if pop_growth:
                 growth_rates[metric] = {
-                    "period_over_period": pop_growth[-5:],  # Last 5 periods
+                    "period_over_period": pop_growth,  # Store ALL periods, not just last 5
                     "avg_growth_rate": round(np.mean([g["growth_rate"] for g in pop_growth]), 2),
                     "latest_growth_rate": pop_growth[-1]["growth_rate"] if pop_growth else None,
                     "median_growth_rate": round(float(np.median([g["growth_rate"] for g in pop_growth])), 2)

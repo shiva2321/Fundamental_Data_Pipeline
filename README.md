@@ -1,367 +1,492 @@
-# Fundamental Data Pipeline
+# 📊 Fundamental Data Pipeline
 
-A comprehensive desktop application for fetching, processing, and analyzing SEC company fundamental data with a native PyQt5 interface.
+**Institutional-Grade Financial Analysis System**
 
-## 🌟 Features
+A comprehensive Python-based desktop application for analyzing SEC EDGAR company filings, generating financial profiles, and providing AI-powered investment insights using local LLM models.
 
-- **Modern Desktop Interface**: Native PyQt5 desktop application with intuitive multi-tab user interface
-- **Unified Profile System**: Combines financial data and ML features into a single, well-organized profile
-- **SEC Company Database**: Fetches company information from SEC's official ticker JSON file
-- **Smart Company Search**: Search by ticker symbol, company name, or CIK with instant results
-- **Interactive Desktop Application**: Six main tabs for comprehensive data management
-- **Batch Processing**: Generate profiles for multiple companies at once with progress tracking
-- **Advanced Analytics**: Health scores, trend analysis, growth rates, volatility metrics, and company comparison
-- **MongoDB Storage**: Efficient storage in organized database structure
-- **Non-blocking Operations**: Multi-threaded profile generation without freezing the UI
+---
 
-## 📊 Database Structure
+## 🌟 Key Features
 
-- **Database Name**: `Entities`
-- **Collection**: `Fundamental_Data_Pipeline`
-- **Profile Structure**: Single unified document per company containing:
-  - Company information (ticker, name, CIK)
-  - Filing metadata
-  - Financial time series data
-  - Latest financial metrics
-  - Financial ratios
-  - Growth rates
-  - Statistical summaries
-  - Trend features
-  - Health indicators
-  - Volatility metrics
-  - Lifecycle features
-  - Anomaly detection
-  - ML-ready feature vectors
+### 📈 **Complete Financial Analysis**
+- **Automated Data Collection**: Fetches all historical SEC filings (10-K, 10-Q, 8-K, DEF 14A, Form 4, SC 13D/G)
+- **Financial Metrics**: Revenue, assets, liabilities, equity, net income, cash flow
+- **Time Series Analysis**: Historical trends, growth rates, volatility metrics
+- **Financial Ratios**: ROE, ROA, debt-to-equity, profit margins, and more
+- **Health Scoring**: Comprehensive 0-100 health score with profitability, leverage, and growth components
+
+### 🔍 **Advanced Filing Analysis** 
+- **Material Events (8-K)**: Corporate events, management changes, accounting issues
+- **Insider Trading (Form 4)**: Buy/sell transactions with dollar amounts and signals
+- **Institutional Ownership (SC 13D/G)**: Activist investors, ownership percentages, intentions
+- **Corporate Governance (DEF 14A)**: CEO compensation, pay ratios, board independence
+
+### 🤖 **AI-Powered Insights**
+- **Local LLM Integration**: Uses Ollama (llama3.2, mistral, phi, etc.)
+- **Multi-Model Analysis**: Compare recommendations across different AI models
+- **Comprehensive Prompts**: Includes financial data + events + governance + insider trading
+- **Investment Recommendations**: Buy/Sell/Hold with confidence scores
+- **Risk Assessment**: Multi-source risk analysis
+- **Catalyst Identification**: Identifies growth opportunities
+
+### 📊 **Interactive Visualizations**
+- **Financial Trends**: Revenue, assets, liabilities, net income over time
+- **Growth Analysis**: Period-over-period growth rates with interactive charts
+- **Hover Tooltips**: Detailed data on mouse hover
+- **Zoom & Pan**: Interactive chart navigation
+- **Export Charts**: Save charts as images
+- **Multiple Views**: Absolute values, percentage change, indexed
+
+### 💾 **Data Management**
+- **MongoDB Storage**: Efficient profile storage and retrieval
+- **Batch Processing**: Process multiple companies in queue
+- **Incremental Updates**: Update existing profiles with new data
+- **Profile Manager**: View, edit, delete, and visualize profiles
+- **Export Options**: Export profiles as JSON
+
+---
 
 ## 🚀 Quick Start
 
+### Prerequisites
+
+```bash
+# Python 3.8+ required
+python --version
+
+# MongoDB required (local or cloud)
+# Download from: https://www.mongodb.com/try/download/community
+
+# Ollama required for AI features (optional)
+# Download from: https://ollama.ai
+```
+
 ### Installation
 
-1. **Install Python dependencies**:
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-2. **Ensure MongoDB is running**:
-   ```bash
-   # Default: mongodb://localhost:27017
-   ```
-
-3. **Configure settings** (optional):
-   Edit `config/config.yaml` to customize database settings
-
-### Running the Application
-
-#### Windows
 ```bash
-run.bat
+# 1. Clone the repository
+git clone <repository-url>
+cd Fundamental_Data_Pipeline
+
+# 2. Create virtual environment
+python -m venv .venv
+
+# 3. Activate virtual environment
+# Windows:
+.venv\Scripts\activate
+# Linux/Mac:
+source .venv/bin/activate
+
+# 4. Install dependencies
+pip install -r requirements.txt
+
+# 5. Install Ollama models (for AI features)
+ollama pull llama3.2
+ollama pull mistral
+ollama pull phi
 ```
 
-#### Linux/macOS
-```bash
-bash run.sh
-```
-
-#### Direct Python
-```bash
-python app.py
-```
-
-The desktop application will launch with a native PyQt5 interface.
-
-## 📖 Desktop Application Guide
-
-For detailed information about using the desktop application, see [DESKTOP_APP_GUIDE.md](DESKTOP_APP_GUIDE.md)
-
-### Main Interface
-
-The desktop application provides six main tabs:
-
-1. **🏠 Home** - Dashboard with system statistics and quick actions
-2. **🔍 Search** - Search companies by ticker, name, or CIK
-3. **📈 Generate Profiles** - Single and batch profile generation with progress tracking
-4. **📊 View Profiles** - Browse, view details, and manage generated profiles
-5. **📉 Analytics** - Portfolio statistics and company comparison
-6. **⚙️ Settings** - Database configuration and backup/restore operations
-   - Health score distribution
-   - Company comparison (up to 5 companies)
-   - Interactive charts and visualizations
-
-6. **⚙️ Settings**
-   - Database configuration
-   - Refresh company ticker cache
-   - View all collections
-   - Clear cache files
-
-### Command Line Interface
-
-The CLI provides:
-1. Search for companies
-2. Generate single company profile
-3. View existing profiles
-4. Batch generate profiles
-5. Database statistics
-6. Launch web dashboard
-7. Exit
-
-## 🏗️ Architecture
-
-### Core Components
-
-1. **company_ticker_fetcher.py**
-   - Fetches and caches SEC company ticker data
-   - Provides search and lookup functionality
-   - Auto-refreshes cache after 7 days
-
-2. **unified_profile_aggregator.py**
-   - Combines financial data and ML features
-   - Generates comprehensive company profiles
-   - Calculates derived metrics and ratios
-
-3. **sec_edgar_api_client.py**
-   - Interfaces with SEC EDGAR API
-   - Fetches company filings and facts
-   - Rate limiting and error handling
-
-4. **mongo_client.py**
-   - MongoDB wrapper with helper methods
-   - Connection management
-   - Bulk operations support
-
-5. **dashboard.py**
-   - Streamlit web application
-   - Interactive visualizations
-   - Real-time data updates
-
-6. **main_unified.py**
-   - Command-line interface
-   - Batch processing support
-   - System statistics
-
-## 📊 Profile Sections Explained
-
-### Company Information
-- Ticker symbol
-- Company name
-- CIK (10-digit format)
-
-### Filing Metadata
-- Total filings count
-- Form type distribution
-- Filings per year
-- Date range of available data
-
-### Financial Data
-Latest values for:
-- Revenue
-- Assets
-- Liabilities
-- Stockholders' Equity
-- Net Income
-- Cash and equivalents
-- Operating Income
-- Gross Profit
-- EPS (Basic and Diluted)
-- Shares Outstanding
-
-### Financial Ratios
-- Debt to Assets
-- Debt to Equity
-- Current Ratio
-- Profit Margin
-- Asset Turnover
-- Return on Equity (ROE)
-- Return on Assets (ROA)
-- Cash Ratio
-
-### Growth Rates
-- Period-over-period growth
-- Average growth rate
-- Latest growth rate
-- Median growth rate
-
-### Health Indicators
-- Overall health score (0-100)
-- Profitability score
-- Leverage score
-- Growth score
-- Health classification (Excellent/Good/Fair/Poor)
-
-### Lifecycle Features
-- Years of available data
-- Filing frequency
-- Growth stage classification
-- Maturity level
-
-### Volatility Metrics
-- Standard deviation
-- Variance
-- Maximum swing
-- Volatility classification
-
-### ML Features
-Flat feature vector ready for machine learning models with normalized metrics.
-
-## 🔧 Configuration
+### Configuration
 
 Edit `config/config.yaml`:
 
 ```yaml
 mongodb:
-  db_name: Entities
-  uri: mongodb://localhost:27017
-  collection: Fundamental_Data_Pipeline
+  uri: "mongodb://localhost:27017/"
+  database: "sec_profiles"
+
+profile_settings:
+  lookback_years: 30
+  ai_enabled: true
+  ai_model: "llama3.2"
+  email_notifications: false
 ```
 
-## 📝 Example: Generate a Profile
+### Running the Application
 
-### Via Dashboard
-1. Go to "Company Search"
-2. Enter ticker (e.g., "AAPL")
-3. Click "Generate Profile for this Company"
-4. Navigate to "Generate Profiles" page
-5. Click "Generate Unified Profile"
+```bash
+# Windows
+run.bat
 
-### Via CLI
-```python
-from company_ticker_fetcher import CompanyTickerFetcher
-from unified_profile_aggregator import UnifiedSECProfileAggregator
-from mongo_client import MongoWrapper
-from sec_edgar_api_client import SECEdgarClient
+# Linux/Mac
+./run.sh
 
-# Initialize
-mongo = MongoWrapper(uri="mongodb://localhost:27017", database="Entities")
-sec_client = SECEdgarClient()
-aggregator = UnifiedSECProfileAggregator(mongo, sec_client)
-ticker_fetcher = CompanyTickerFetcher()
-
-# Find company
-company = ticker_fetcher.get_by_ticker("AAPL")
-
-# Generate profile
-profile = aggregator.aggregate_company_profile(
-    cik=company['cik'],
-    company_info=company,
-    output_collection="Fundamental_Data_Pipeline"
-)
+# Or directly
+python desktop_app_pyside.py
 ```
-
-## 🔍 Searching Companies
-
-The system fetches the official SEC company tickers JSON file which contains all publicly traded companies in the US.
-
-### Search Methods
-
-1. **By Ticker**: Exact match (case-insensitive)
-   ```python
-   company = ticker_fetcher.get_by_ticker("MSFT")
-   ```
-
-2. **By Company Name**: Partial match
-   ```python
-   results = ticker_fetcher.search_by_name("Apple", limit=10)
-   ```
-
-3. **By CIK**: With or without leading zeros
-   ```python
-   company = ticker_fetcher.get_by_cik("0000320193")
-   ```
-
-## 🎯 Use Cases
-
-1. **Investment Research**: Analyze company financials and health
-2. **Portfolio Management**: Track multiple companies
-3. **Risk Assessment**: Evaluate volatility and financial health
-4. **Trend Analysis**: Identify growth patterns
-5. **Machine Learning**: Use feature vectors for predictive models
-6. **Comparative Analysis**: Compare companies side-by-side
-
-## 📈 Performance
-
-- **Profile Generation**: ~5-15 seconds per company (depends on SEC API)
-- **Batch Processing**: Includes automatic rate limiting
-- **Database Queries**: Optimized indexes for fast retrieval
-- **Caching**: Company ticker data cached locally for 7 days
-
-## 🛠️ Troubleshooting
-
-### MongoDB Connection Issues
-- Ensure MongoDB is running: `mongod`
-- Check connection URI in `config/config.yaml`
-- Verify database permissions
-
-### SEC API Errors
-- SEC API has rate limits (10 requests/second)
-- The system includes automatic rate limiting
-- Some companies may have no filings available
-
-### Dashboard Not Loading
-- Install requirements: `pip install -r requirements.txt`
-- Run the desktop app: `python app.py`
-- The app will prefer a PyQt5 desktop GUI when available, and will automatically fall back to a Tkinter UI if PyQt5 is not usable on your platform.
-
-### No Companies Found
-- Refresh ticker cache from Settings page
-- Check internet connection
-- Verify SEC website is accessible
-
-## 📦 Dependencies
-
-- `pymongo`: MongoDB driver
-- `requests`: HTTP requests
-- `numpy`: Numerical computing
-- `pyyaml`: YAML configuration
-- `sec-edgar-api`: SEC EDGAR API client
-- `pandas`: Data manipulation
-- `plotly`: Interactive charts (optional)
-
-## 🔐 Data Privacy
-
-- All data is fetched from public SEC filings
-- No personal information is stored
-- Local MongoDB storage only
-- No external data sharing
-
-## 📄 License
-
-This project is for educational and research purposes.
-
-## 🤝 Contributing
-
-Contributions welcome! Areas for improvement:
-- Additional financial metrics
-- More visualization types
-- Enhanced ML features
-- Export functionality
-- Advanced filtering
-
-## 📞 Support
-
-For issues or questions:
-1. Check this README
-2. Review error logs
-3. Verify MongoDB connection
-4. Check SEC API status
-
-## 🔄 Updates
-
-### Version 2.0 (Current)
-- ✅ Unified profile system (combines financial + ML features)
-- ✅ SEC company ticker integration
-- ✅ Streamlit dashboard
-- ✅ Batch processing
-- ✅ Advanced analytics
-- ✅ Health scoring system
-
-### Future Enhancements
-- [ ] Export to Excel/CSV
-- [ ] PDF report generation
-- [ ] Email alerts
-- [ ] Historical comparisons
-- [ ] Industry benchmarking
-- [ ] Real-time updates
-- [ ] API endpoint creation
 
 ---
 
-**Happy analyzing! 📊**
+## 📖 Usage Guide
+
+### 1. **Generate Company Profiles**
+
+1. Click **Dashboard_Generate** tab
+2. Enter ticker symbols (e.g., `AAPL, MSFT, GOOGL`)
+3. Click **Add to Queue**
+4. Click **Start Processing**
+5. Monitor progress in Queue Monitor tab
+
+### 2. **View Profiles**
+
+1. Click **Profile Manager** tab
+2. Select a profile from the list
+3. Click **Visualize Selected**
+4. Explore tabs:
+   - **Overview**: Company info, latest financials, health summary
+   - **Decision Summary**: Key metrics, investment recommendation
+   - **Financial Trends**: Charts of revenue, assets, liabilities, net income
+   - **Financial Ratios**: ROE, ROA, margins, ratios
+   - **Growth Analysis**: Period-over-period growth rates
+   - **Health Indicators**: Detailed health scoring breakdown
+   - **AI/ML Analysis**: AI-powered investment insights
+
+### 3. **AI Analysis**
+
+**Multi-Model Analysis:**
+1. Go to Settings tab
+2. Enable AI analysis
+3. Select multiple models (llama3.2, mistral, phi, llama2)
+4. Generate profiles
+5. AI/ML Analysis tab shows consensus and individual model recommendations
+
+**Single Model:**
+- Set one model in config
+- Get faster analysis from that model
+
+### 4. **Interactive Charts**
+
+- **Hover**: See exact values on data points
+- **Double-click**: Open chart in interactive window
+- **Zoom**: Scroll wheel to zoom in/out
+- **Pan**: Click and drag to pan
+- **Reset**: Home button to reset view
+
+---
+
+## 🏗️ Architecture
+
+### Core Components
+
+```
+Fundamental_Data_Pipeline/
+├── desktop_app_pyside.py          # Main application (PySide6)
+├── visualization_window.py         # Chart and visualization
+├── unified_profile_aggregator.py  # Profile generation engine
+├── sec_edgar_api_client.py        # SEC EDGAR API client
+├── ai_analyzer.py                 # AI/ML analysis
+├── mongo_client.py                # MongoDB interface
+│
+├── Filing Parsers:
+│   ├── form_8k_parser.py          # Material events (8-K)
+│   ├── form4_parser.py            # Insider trading (Form 4)
+│   ├── sc13_parser.py             # Institutional ownership (SC 13D/G)
+│   ├── def14a_parser.py           # Corporate governance (DEF 14A)
+│   └── filing_content_parser.py   # Content fetching & parsing
+│
+├── UI Components:
+│   ├── ollama_manager_dialog.py   # Ollama model management
+│   ├── ollama_model_manager.py    # Model manager backend
+│   └── profile_period_editor.py   # Period editor dialog
+│
+├── Utilities:
+│   ├── company_ticker_fetcher.py  # Ticker lookup
+│   ├── email_notifier.py          # Email notifications
+│   └── config.py                  # Configuration
+│
+├── config/
+│   └── config.yaml                # Application settings
+│
+└── docs/
+    ├── ARCHITECTURE.md            # Technical architecture
+    ├── AI_SETUP_GUIDE.md          # Ollama setup guide
+    ├── IMPLEMENTATION_DETAILS.md  # Implementation details
+    └── GETTING_STARTED.md         # Getting started guide
+```
+
+### Data Flow
+
+```
+1. User adds ticker → Queue
+2. SEC EDGAR API → Fetch ALL filings (1000+)
+3. Parse filings:
+   - 10-K/10-Q → Financial metrics
+   - 8-K → Material events
+   - Form 4 → Insider transactions (buy/sell amounts)
+   - SC 13D/G → Ownership data (investor names, %)
+   - DEF 14A → Compensation (CEO pay, ratios)
+4. Calculate:
+   - Financial ratios
+   - Growth rates
+   - Health scores
+   - Trends and volatility
+5. AI Analysis:
+   - Create comprehensive prompt with ALL data
+   - Send to Ollama models
+   - Generate recommendations
+6. Store in MongoDB
+7. Display in UI with interactive charts
+```
+
+---
+
+## 📊 Data Extracted
+
+### Financial Metrics (from 10-K/10-Q):
+- Revenue, Assets, Liabilities, Equity
+- Net Income, Operating Income, EBIT, EBITDA
+- Cash, Cash Equivalents, Current Assets/Liabilities
+- Long-term Debt, Total Debt
+- Stockholders Equity
+
+### Material Events (from 8-K):
+- Management changes (CEO, CFO departures)
+- Accounting issues (restatements, auditor changes)
+- Acquisitions, divestitures
+- Major agreements
+- Financial obligations
+- Event frequency patterns
+
+### Insider Trading (from Form 4):
+- Transaction type (buy, sell, option exercise)
+- Number of shares
+- Price per share
+- Total transaction value
+- Insider name and title
+- Net buying/selling amounts
+- Buy/sell signal (Bullish/Bearish)
+
+### Institutional Ownership (from SC 13D/G):
+- Investor name
+- Ownership percentage
+- Number of shares owned
+- Activist vs passive investor
+- Activist intentions (board changes, strategic alternatives)
+- Ownership concentration
+
+### Corporate Governance (from DEF 14A):
+- CEO total compensation
+- CEO salary, bonus, stock awards
+- Pay ratio (CEO to median employee)
+- Board size and composition
+- Number of independent directors
+- Independence ratio
+
+---
+
+## 🤖 AI Models
+
+### Supported Models
+
+**Via Ollama:**
+- `llama3.2` - Fast, accurate (recommended)
+- `llama2` - Stable, reliable
+- `mistral` - Good balance
+- `phi` - Lightweight, fast
+
+### AI Output
+
+```json
+{
+  "investment_thesis": "Comprehensive analysis...",
+  "recommendation": "Buy|Hold|Sell",
+  "confidence": 0.85,
+  "strengths": ["...", "...", "..."],
+  "weaknesses": ["...", "...", "..."],
+  "risks": ["...", "..."],
+  "catalysts": ["...", "..."],
+  "insider_signals": "Strong Bullish - $3.8M net buying",
+  "institutional_signals": "Cautious - Activist pressure",
+  "governance_assessment": "Mixed - Strong board but high CEO pay"
+}
+```
+
+---
+
+## 🔧 Configuration Options
+
+### `config/config.yaml`
+
+```yaml
+mongodb:
+  uri: "mongodb://localhost:27017/"  # MongoDB connection
+  database: "sec_profiles"           # Database name
+
+profile_settings:
+  lookback_years: 30                 # Years of historical data
+  ai_enabled: true                   # Enable AI analysis
+  ai_model: "llama3.2"               # Default AI model
+  multi_model_enabled: false         # Multi-model analysis
+  selected_models:                   # Models for multi-model
+    - "llama3.2"
+    - "mistral"
+  email_notifications: false         # Email alerts
+  email_recipient: "your@email.com"
+
+sec_edgar:
+  user_agent: "YourName your@email.com"  # Required by SEC
+  rate_limit: 0.1                    # Seconds between requests
+```
+
+---
+
+## 📈 Performance
+
+- **Filings per company**: 1,000+ (all historical with pagination)
+- **Detailed parsing**: Recent 20 Form 4s, 10 SC 13s, 5 DEF 14As
+- **Processing time**: ~30-60 seconds per company (depends on AI)
+- **Storage**: ~500KB-2MB per profile
+- **Rate limit**: 10 requests/second to SEC (compliant)
+
+---
+
+## 🛠️ Troubleshooting
+
+### MongoDB Connection Failed
+```bash
+# Check MongoDB is running
+mongod --version
+
+# Start MongoDB service
+# Windows: Services → MongoDB
+# Linux: sudo systemctl start mongod
+```
+
+### Ollama Not Available
+```bash
+# Check Ollama is running
+ollama list
+
+# Start Ollama service
+ollama serve
+
+# Pull missing models
+ollama pull llama3.2
+```
+
+### No Revenue Data
+- Revenue extraction uses multiple field names
+- Some companies may not report in standard XBRL format
+- Check raw financial data in MongoDB for alternatives
+
+### Charts Not Displaying
+- Ensure matplotlib backend is installed
+- Check PySide6 installation: `pip install PySide6`
+- Try reopening visualization window
+
+---
+
+## 📚 Complete Documentation
+
+### Main Guides:
+- **README.md** (this file) - Overview and quick start
+- **[Getting Started](docs/GETTING_STARTED.md)** - Step-by-step setup guide
+- **[Data Dictionary](docs/DATA_DICTIONARY.md)** - Complete reference for all metrics ⭐
+- **[Architecture](docs/ARCHITECTURE.md)** - Technical architecture and design
+- **[Implementation Details](docs/IMPLEMENTATION_DETAILS.md)** - How everything works
+- **[AI Setup Guide](docs/AI_SETUP_GUIDE.md)** - Ollama configuration
+- **[Changelog](docs/CHANGELOG.md)** - Version history
+
+### What Each Document Covers:
+
+**📖 DATA_DICTIONARY.md** (⭐ Essential for understanding data):
+- Every single data point explained (100+ metrics)
+- What each metric is, how it's calculated, why it's important
+- Good/bad value ranges and industry benchmarks
+- What insights each metric provides
+- How each metric is used in analysis
+- Complete profile structure documentation
+
+**🏗️ ARCHITECTURE.md**:
+- System components and data flow
+- Technology stack
+- Database schema
+- API integrations
+- Performance considerations
+
+**🚀 GETTING_STARTED.md**:
+- Installation steps
+- First-time setup
+- Processing your first company
+- Common issues and solutions
+
+---
+
+## 📝 License
+
+[Your License Here]
+
+---
+
+## 🤝 Contributing
+
+Contributions welcome! Please read CONTRIBUTING.md for guidelines.
+
+---
+
+## 📧 Support
+
+For issues and questions:
+- GitHub Issues: [Repository Issues]
+- Email: [Your Email]
+- **Data Questions**: See [DATA_DICTIONARY.md](docs/DATA_DICTIONARY.md)
+- **Setup Help**: See [GETTING_STARTED.md](docs/GETTING_STARTED.md)
+- **Technical Details**: See [ARCHITECTURE.md](docs/ARCHITECTURE.md)
+
+---
+
+## 🙏 Acknowledgments
+
+- **SEC EDGAR API**: https://www.sec.gov/edgar/sec-api-documentation
+- **sec-edgar-api**: Python wrapper for SEC API
+- **Ollama**: Local LLM runtime
+- **MongoDB**: Database storage
+- **PySide6**: Qt framework for Python
+- **Matplotlib**: Chart visualization
+
+---
+
+## ⚡ Quick Reference
+
+### Common Commands
+
+```bash
+# Run application
+python desktop_app_pyside.py
+
+# Install model
+ollama pull llama3.2
+
+# Check MongoDB
+mongosh
+> use sec_profiles
+> db.unified_profiles.countDocuments()
+
+# Update dependencies
+pip install -r requirements.txt --upgrade
+```
+
+### Keyboard Shortcuts
+
+- **Ctrl+Q**: Quit application
+- **F5**: Refresh profile list
+- **Double-click chart**: Open interactive view
+
+---
+
+## 🔮 Future Enhancements
+
+- [ ] Real-time price data integration
+- [ ] Peer comparison analysis
+- [ ] Sector analysis
+- [ ] Automated alerts for material events
+- [ ] Portfolio tracking
+- [ ] PDF report generation
+- [ ] Cloud deployment option
+
+---
+
+**Version**: 1.0.0  
+**Last Updated**: December 2025  
+**Status**: ✅ Production Ready
+
