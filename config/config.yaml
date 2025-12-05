@@ -12,11 +12,11 @@ collections:
 email_notifications:
   alert_on_complete: true
   alert_on_error: true
-  alert_on_ticker_failed: false
-  enabled: false
-  recipient_email: ''
-  sender_email: ''
-  sender_password: ''
+  alert_on_ticker_failed: true
+  enabled: true
+  recipient_email: practiceprojects360@gmail.com
+  sender_email: shivamprj1@gmail.com
+  sender_password: szdi absc ruuj rexw
   smtp_port: 587
   smtp_server: smtp.gmail.com
 general:

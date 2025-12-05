@@ -290,7 +290,7 @@ class EmailNotifier:
             
         except Exception as e:
             logger.error(f"Failed to send email notification: {e}")
-    
+
     def test_connection(self) -> bool:
         """Test email configuration."""
         try:

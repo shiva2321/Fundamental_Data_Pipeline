@@ -568,6 +568,7 @@ class MainWindow(QMainWindow):
         self.aggregator = UnifiedSECProfileAggregator(self.mongo, self.sec_client)
         self.ticker_fetcher = CompanyTickerFetcher()
         
+
         # Processing queue
         self.processing_queue = []  # List of ticker identifiers to process
 
@@ -836,9 +837,9 @@ class MainWindow(QMainWindow):
         
         bulk_h1 = QHBoxLayout()
         self.spin_top_n = QSpinBox()
-        self.spin_top_n.setRange(1, 100)
+        self.spin_top_n.setRange(1, 100000)
         self.spin_top_n.setValue(10)
-        self.spin_top_n.setMaximumWidth(60)
+        self.spin_top_n.setMaximumWidth(80)
         bulk_h1.addWidget(QLabel("N ="))
         bulk_h1.addWidget(self.spin_top_n)
         quick_layout.addLayout(bulk_h1)
@@ -1001,6 +1002,7 @@ class MainWindow(QMainWindow):
 
         return tab
 
+
     def create_settings_tab(self):
         tab = QWidget()
         layout = QVBoxLayout(tab)
@@ -1096,6 +1098,7 @@ class MainWindow(QMainWindow):
 
         layout.addWidget(grp_email)
 
+        # Save settings button
         btn_save = QPushButton("Save Settings")
         btn_save.clicked.connect(self.save_settings)
         layout.addWidget(btn_save)
@@ -1951,7 +1954,9 @@ class MainWindow(QMainWindow):
 
             # Test connection
             self.log_message("Testing email connection...")
-            if notifier.test_connection():
+            success, message = notifier.test_connection()
+
+            if success:
                 self.log_message("✓ Email connection successful!")
 
                 # Send test email
@@ -1976,14 +1981,16 @@ class MainWindow(QMainWindow):
                     f"{self.input_recipient_email.text()}\n\n"
                     "Check your inbox (and spam folder).")
             else:
-                self.log_message("✗ Email connection failed!")
+                self.log_message(f"✗ Email connection failed: {message}")
                 QMessageBox.warning(self, "Connection Failed",
-                    "Could not connect to SMTP server.\n\n"
-                    "Please check:\n"
-                    "- SMTP server and port are correct\n"
-                    "- Email and password are valid\n"
-                    "- For Gmail, use App Password (not regular password)\n"
-                    "- Firewall allows SMTP connection")
+                    f"Could not connect to SMTP server.\n\n"
+                    f"Error: {message}\n\n"
+                    "Please verify:\n"
+                    "- SMTP server is correct (usually smtp.gmail.com for Gmail)\n"
+                    "- Port is correct (usually 587 for TLS)\n"
+                    "- Email address is correct\n"
+                    "- For Gmail: Use App Password, not your regular password\n"
+                    "- Firewall allows outgoing SMTP connections")
 
         except Exception as e:
             logger.exception("Email test failed")
@@ -2081,6 +2088,7 @@ class MainWindow(QMainWindow):
                 "background-color: #5c636a; }"
             )
             logger.error(f"Error checking Ollama status: {e}")
+
 
     # --- Worker Handlers ---
     @Slot(str, str, str)
