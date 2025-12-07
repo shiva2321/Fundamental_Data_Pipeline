@@ -1473,117 +1473,284 @@ Interpretation: 4x more buying (very bullish)
 
 ---
 
+## Narrative Analysis (10-K/10-Q)
+
+### `narrative_analysis` **[NEW]**
+
+**Purpose**: Extract and analyze narrative sections from 10-K and 10-Q filings for qualitative insights  
+**Source**: 10-K (annual) and 10-Q (quarterly) reports  
+**Why Important**: Provides qualitative context beyond numbers - risks, strategy, management outlook
+
+```python
+{
+    "total_reports": 4,
+    "forms_seen": {
+        "10-K": 2,
+        "10-Q": 2
+    },
+    "reports": [
+        {
+            "form": "10-K",
+            "filing_date": "2024-02-15",
+            "report_date": "2023-12-31",
+            "accession_number": "0001065280-24-000123",
+            "available": True,
+            "sections": {
+                "1": {                          # Business Overview
+                    "summary": {
+                        "word_count": 5432,
+                        "keyword_counts": {
+                            "revenue": 45,
+                            "cash": 23,
+                            "debt": 12
+                        }
+                    },
+                    "text": "Item 1. Business\n\nOur company operates..."
+                },
+                "1A": {                         # Risk Factors
+                    "summary": {
+                        "word_count": 12543,
+                        "keyword_counts": {
+                            "risk": 312,
+                            "litigation": 45,
+                            "cyber": 18,
+                            "regulatory": 67,
+                            "macroeconomic": 23
+                        }
+                    },
+                    "text": "Item 1A. Risk Factors..."
+                },
+                "7": {                          # MD&A
+                    "summary": {
+                        "word_count": 8765,
+                        "keyword_counts": {
+                            "revenue": 89,
+                            "liquidity": 34,
+                            "cash": 56
+                        }
+                    },
+                    "text": "Item 7. Management's Discussion..."
+                },
+                "7A": {                         # Market Risk
+                    "summary": {
+                        "word_count": 1234,
+                        "keyword_counts": {
+                            "risk": 45,
+                            "debt": 12
+                        }
+                    },
+                    "text": "Item 7A. Market Risk..."
+                },
+                "8": {                          # Financial Statements
+                    "summary": {
+                        "word_count": 456,
+                        "keyword_counts": {}
+                    },
+                    "text": "Item 8. Financial Statements..."
+                }
+            },
+            "insights": {
+                "risk_intensity": "High",
+                "business_complexity": "Moderate",
+                "financial_discussion_depth": "Detailed"
+            }
+        }
+    ],
+    "risk_summary": {
+        "average_word_count": 11234,
+        "keyword_mentions": 856
+    },
+    "mdna_summary": {
+        "average_word_count": 8765,
+        "keyword_mentions": 234
+    },
+    "warnings": []
+}
+```
+
+### Narrative Analysis Fields:
+
+#### **Sections Explained**
+
+**Section 1: Business**
+- **What**: Overview of company's business, products, services, markets, competition
+- **Word Count**: Typical range 3,000-10,000 words
+- **Keywords Tracked**: revenue, cash, debt
+- **Insights**: Strategic focus, business model complexity
+
+**Section 1A: Risk Factors**
+- **What**: Detailed disclosure of business risks
+- **Word Count**: Typical range 8,000-20,000 words (longer = more risks or more detailed)
+- **Keywords Tracked**: risk, litigation, cyber, regulatory, liquidity, macroeconomic
+- **Insights**: Risk profile, areas of concern
+- **Red Flags**: Growing section length, new specific risks, high litigation mentions
+- **Green Flags**: Stable/decreasing length, generic industry risks
+
+**Section 7: Management's Discussion and Analysis (MD&A)**
+- **What**: Management's explanation of financial results, trends, outlook
+- **Word Count**: Typical range 5,000-15,000 words (longer = more transparent)
+- **Keywords Tracked**: revenue, liquidity, cash, macroeconomic
+- **Insights**: Management transparency, financial health concerns
+- **Red Flags**: Decreasing length (less transparency), high liquidity mentions, defensive language
+- **Green Flags**: Detailed discussion, confident outlook, clear explanations
+
+**Section 7A: Market Risk**
+- **What**: Quantitative and qualitative disclosures about market risks (interest rate, FX, commodity)
+- **Word Count**: Typical range 500-3,000 words
+- **Keywords Tracked**: risk, debt
+- **Insights**: Financial risk exposure
+
+**Section 8: Financial Statements**
+- **What**: Reference to detailed financial statements and notes
+- **Word Count**: Usually brief (200-1,000 words) as details are in exhibits
+- **Keywords Tracked**: (minimal)
+- **Insights**: Structure and presentation
+
+#### **Keyword Analysis**
+
+**Tracked Keywords**:
+- `risk` - Overall risk mentions (baseline)
+- `litigation` - Legal issues, lawsuits
+- `cyber` or `cybersecurity` - Cybersecurity risks
+- `regulatory` - Compliance and regulatory risks
+- `liquidity` - Cash flow and liquidity concerns
+- `macroeconomic` - Economic environment risks
+- `revenue` - Revenue discussions
+- `cash` - Cash and cash flow
+- `debt` - Debt and leverage
+
+**Interpretation**:
+- **High risk mentions**: More risks or detailed disclosures
+- **Growing litigation mentions**: Increasing legal exposure
+- **Cyber keyword increase**: Growing cybersecurity focus (common trend)
+- **High liquidity mentions**: Potential cash flow concerns
+- **Revenue keyword density**: Strategic importance of revenue growth
+
+#### **Aggregate Metrics**
+
+**risk_summary**:
+- `average_word_count`: Average length of Risk Factors sections across reports
+- `keyword_mentions`: Total risk-related keyword mentions
+- **High values**: Complex risk profile or detailed disclosure
+
+**mdna_summary**:
+- `average_word_count`: Average length of MD&A sections
+- `keyword_mentions`: Total MD&A keyword mentions
+- **High word count**: Good transparency
+- **Low word count**: Less detailed disclosure
+
+#### **Use Cases**
+
+1. **Risk Assessment**
+   - Compare risk section length across companies
+   - Track changes in risk disclosure over time
+   - Identify specific risk areas (litigation, cyber, regulatory)
+
+2. **Trend Analysis**
+   - Monitor MD&A discussion depth over time
+   - Identify shifts in management focus
+   - Detect changes in transparency
+
+3. **Comparative Analysis**
+   - Compare risk disclosures to peers
+   - Benchmark discussion depth
+   - Industry-specific risk patterns
+
+4. **AI Integration**
+   - Feed narrative insights to AI for holistic analysis
+   - Combine qualitative + quantitative for better recommendations
+   - Context for unusual financial metrics
+
+---
+
 ## Key Persons
 
 ### `key_persons`
 
 **Purpose**: Comprehensive extraction of key company personnel, including executives, board members, insider holdings, and major shareholders  
 **Source**: DEF 14A, Form 4, SC 13D/G filings  
-**Why Important**: Understanding who runs and owns a company is essential for assessing management quality, alignment with shareholders, and potential risks or opportunities
+**Why Important**: Understanding who runs and owns a company is essential for assessing management quality, alignment with shareholders, and potential risks or opportunities  
+**NEW Features**: Active status tracking, enhanced name validation, holding company identification
 
 ```python
 {
     "executives": [                          # Key executives list
         {
             "name": "John Smith",
-            "title": "CEO",
-            "source": "DEF 14A",
-            "filing_date": "2024-04-15"
+            "title": "Chief Executive Officer",
+            "shares_owned": "125000",
+            "source": "Form 4",
+            "filing_date": "2024-11-15",
+            "active": True                   # NEW: Filing within 24 months
         },
         {
             "name": "Jane Doe",
-            "title": "CFO",
+            "title": "Chief Financial Officer",
+            "shares_owned": "85000",
             "source": "DEF 14A",
-            "filing_date": "2024-04-15"
+            "filing_date": "2024-04-15",
+            "active": True
         }
     ],
     "board_members": [                       # Board of directors
         {
             "name": "Robert Johnson",
-            "role": "Director",
-            "is_independent": True,
+            "role": "Independent Director",
+            "independent": True,             # NEW: Independence status
             "source": "DEF 14A",
-            "filing_date": "2024-04-15"
+            "filing_date": "2024-04-15",
+            "active": True
         },
         {
-            "name": "Board Summary",          # Board statistics
-            "role": "Board Statistics",
-            "total_directors": 12,
-            "independent_directors": 10,
-            "independence_ratio": 0.83
+            "name": "Mary Williams",
+            "role": "Director",
+            "independent": False,
+            "source": "DEF 14A",
+            "filing_date": "2023-04-20",
+            "active": True
         }
     ],
-    "insider_holdings": [                    # Insider ownership
+    "insider_holdings": [                    # Insider ownership with transaction data
         {
             "name": "John Smith",
-            "title": "CEO",
-            "shares_owned": 2500000,
-            "latest_filing_date": "2024-11-15",
-            "net_buy_value": 5000000.0,
-            "net_sell_value": 1200000.0,
-            "net_shares": 15000,
-            "transaction_count": 5,
-            "signal": "Bullish"
-        }
-    ],
-    "holding_companies": [                   # Major institutional shareholders
-        {
-            "name": "Vanguard Group",
-            "ownership_percent": 8.2,
-            "shares_owned": 45000000,
-            "is_activist": False,
-            "form_type": "SC 13G",
-            "filing_type": "Passive (13G)",
-            "latest_filing_date": "2024-02-14"
+            "shares": 125000,
+            "percentage": "1.2%",            # NEW: Ownership percentage
+            "source": "Form 4"
         },
         {
-            "name": "Activist Fund XYZ",
-            "ownership_percent": 5.8,
-            "shares_owned": 32000000,
-            "is_activist": True,
-            "activist_intent": "Board/Governance Changes",
-            "purpose": "Seeking board representation...",
-            "form_type": "SC 13D",
-            "filing_type": "Activist (13D)",
-            "latest_filing_date": "2024-11-15"
-        }
-    ],
-    "summary": {                             # Aggregated summary
-        "ceo": {
-            "name": "John Smith",
-            "identified": True
-        },
-        "cfo": {
             "name": "Jane Doe",
-            "identified": True
-        },
-        "chairman": {
-            "name": "Not identified",
-            "identified": False
-        },
-        "executive_count": 5,
-        "board_member_count": 12,
-        "board_independence": {
-            "total_directors": 12,
-            "independent_directors": 10,
-            "independence_ratio": 0.83
-        },
-        "insider_holdings": {
-            "count": 8,
-            "total_shares": 15000000,
-            "total_buy_value": 25000000.0,
-            "total_sell_value": 5000000.0,
-            "net_activity": "Buying"
-        },
-        "institutional_ownership": {
-            "holder_count": 5,
-            "total_ownership_percent": 28.5,
-            "activist_count": 1,
-            "largest_holder": "Vanguard Group",
-            "largest_stake": 8.2
+            "shares": 85000,
+            "percentage": "0.8%",
+            "source": "Form 4"
         }
-    },
-    "generated_at": "2024-12-04T10:30:00"
+    ],
+    "institutional_investors": [             # NEW: Detailed institutional holdings
+        {
+            "name": "Vanguard Group Inc",
+            "shares": 5432100,
+            "percentage": "8.7%",
+            "filing_type": "SC 13G",
+            "filing_date": "2024-02-14"
+        },
+        {
+            "name": "BlackRock Inc",
+            "shares": 4987650,
+            "percentage": "8.0%",
+            "filing_type": "SC 13G",
+            "filing_date": "2024-02-15"
+        }
+    ],
+    "holding_companies": [                   # Major institutional shareholders (legacy format)
+        {
+            "name": "Vanguard Group Inc",
+            "ownership_percent": "8.7%",
+            "purpose": "Investment purposes"
+        }
+    ],
+    "total_key_persons": 45,                 # NEW: Total count
+    "active_executives": 12,                 # NEW: Currently active executives
+    "active_board_members": 11,              # NEW: Currently active board members
+    "generated_at": "2024-12-07T10:30:00"
 }
 ```
 
