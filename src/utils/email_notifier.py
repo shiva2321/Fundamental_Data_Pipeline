@@ -265,8 +265,12 @@ class EmailNotifier:
     
     def _send_email(self, subject: str, html_body: str):
         """Send email with HTML content."""
+        if not self.enabled:
+            logger.debug("Email notifications disabled in config")
+            return
+
         if not self.sender_email or not self.recipient_email:
-            logger.warning("Email not configured. Skipping email notification.")
+            logger.warning("Email not configured properly. Missing sender or recipient email address.")
             return
         
         try:
@@ -279,27 +283,38 @@ class EmailNotifier:
             html_part = MIMEText(html_body, 'html')
             msg.attach(html_part)
             
-            # Send email
-            with smtplib.SMTP(self.smtp_server, self.smtp_port) as server:
+            # Send email with better error handling
+            logger.debug(f"Connecting to SMTP server {self.smtp_server}:{self.smtp_port}")
+            with smtplib.SMTP(self.smtp_server, self.smtp_port, timeout=30) as server:
+                logger.debug("Starting TLS...")
                 server.starttls()
+
                 if self.sender_password:
+                    logger.debug(f"Logging in as {self.sender_email}")
                     server.login(self.sender_email, self.sender_password)
+
+                logger.debug(f"Sending email to {self.recipient_email}")
                 server.send_message(msg)
             
-            logger.info(f"Email notification sent: {subject}")
-            
-        except Exception as e:
-            logger.error(f"Failed to send email notification: {e}")
+            logger.info(f"✓ Email notification sent successfully: {subject}")
 
-    def test_connection(self) -> bool:
+        except smtplib.SMTPAuthenticationError as e:
+            logger.error(f"✗ SMTP Authentication failed. Please check your email credentials: {e}")
+        except smtplib.SMTPException as e:
+            logger.error(f"✗ SMTP error occurred while sending email: {e}")
+        except Exception as e:
+            logger.error(f"✗ Failed to send email notification: {e}", exc_info=True)
+
+    def test_connection(self) -> tuple:
         """Test email configuration."""
         try:
             with smtplib.SMTP(self.smtp_server, self.smtp_port, timeout=10) as server:
                 server.starttls()
                 if self.sender_password:
                     server.login(self.sender_email, self.sender_password)
-            return True
+            return True, "Connection successful"
         except Exception as e:
-            logger.error(f"Email connection test failed: {e}")
-            return False
+            error_msg = str(e)
+            logger.error(f"Email connection test failed: {error_msg}")
+            return False, error_msg
 

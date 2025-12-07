@@ -64,7 +64,7 @@ class UnifiedSECProfileAggregator:
         metrics_include = opts.get('metrics')
         incremental = bool(opts.get('incremental', False))
 
-        log('info', f"Starting aggregation for CIK {cik}. options={opts}")
+        log('info', f"Starting aggregation for CIK {cik}")
 
         # Fetch filings from SEC EDGAR API
         log('info', f"Fetching filings for CIK {cik} from SEC EDGAR API")
@@ -344,18 +344,59 @@ class UnifiedSECProfileAggregator:
                             original_model = opts.get('config', {}).get('profile_settings', {}).get('ai_model')
                             opts['config']['profile_settings']['ai_model'] = model
 
-                            # Analyze with this model
-                            analysis = ai_analyzer.analyze_profile(profile)
-                            profile["ai_analysis_multi"][model] = analysis
+                            # Create a new analyzer instance for each model to avoid state issues
+                            model_analyzer = AIAnalyzer(opts.get('config', {}))
+
+                            # Analyze with this model (with Windows-compatible timeout protection)
+                            import threading
+
+                            analysis_result = [None]
+                            analysis_error = [None]
+
+                            def analyze_with_timeout():
+                                try:
+                                    analysis_result[0] = model_analyzer.analyze_profile(profile)
+                                except Exception as e:
+                                    analysis_error[0] = e
+
+                            # Run analysis in a separate thread with timeout
+                            thread = threading.Thread(target=analyze_with_timeout, daemon=True)
+                            thread.start()
+                            thread.join(timeout=90)  # 90-second timeout
+
+                            if thread.is_alive():
+                                # Thread is still running - timeout occurred
+                                log('info', f"Analysis with {model} timed out after 90 seconds")
+                                profile["ai_analysis_multi"][model] = {
+                                    'error': 'Analysis timed out after 90 seconds',
+                                    'provider': 'timeout'
+                                }
+                            elif analysis_error[0]:
+                                # Exception occurred during analysis
+                                log('info', f"Analysis with {model} failed: {analysis_error[0]}")
+                                profile["ai_analysis_multi"][model] = {
+                                    'error': str(analysis_error[0]),
+                                    'provider': 'error'
+                                }
+                            elif analysis_result[0]:
+                                # Analysis completed successfully
+                                profile["ai_analysis_multi"][model] = analysis_result[0]
+                                log('info', f"Analysis with {model} completed")
+                            else:
+                                # Unknown state
+                                log('info', f"Analysis with {model} returned no result")
+                                profile["ai_analysis_multi"][model] = {
+                                    'error': 'No result returned',
+                                    'provider': 'unknown_error'
+                                }
 
                             # Restore original model
                             if original_model:
                                 opts['config']['profile_settings']['ai_model'] = original_model
 
-                            log('info', f"Analysis with {model} completed")
                         except Exception as model_error:
-                            log('info', f"Analysis with {model} failed: {model_error}")
-                            profile["ai_analysis_multi"][model] = {'error': str(model_error)}
+                            log('info', f"Critical error with model {model}: {model_error}")
+                            profile["ai_analysis_multi"][model] = {'error': str(model_error), 'provider': 'critical_error'}
 
                     # Set primary analysis to first model's result
                     first_model = selected_models[0]

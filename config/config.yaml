@@ -16,7 +16,7 @@ email_notifications:
   enabled: true
   recipient_email: practiceprojects360@gmail.com
   sender_email: shivamprj1@gmail.com
-  sender_password: szdi absc ruuj rexw
+  sender_password: szdiabscruujrexw
   smtp_port: 587
   smtp_server: smtp.gmail.com
 general:
@@ -47,17 +47,17 @@ rate_limits:
   polygon: 120
 ui_settings:
   dashboard_splitter_sizes:
-  - 680
-  - 981
+  - 480
+  - 692
   main_splitter_sizes:
   - 1214
   - 143
   splitter_sizes: []
   window_geometry:
-    height: 1420
-    width: 1705
-    x: 36
-    y: 30
+    height: 1361
+    width: 1216
+    x: 170
+    y: 34
 update_frequency:
   fundamentals: DAILY
   institutional: QUARTERLY

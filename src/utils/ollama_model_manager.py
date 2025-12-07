@@ -23,7 +23,7 @@ class OllamaModelManager:
     def is_ollama_running(self) -> bool:
         """Check if Ollama service is running."""
         try:
-            response = requests.get(f"{self.base_url}/api/tags", timeout=2)
+            response = requests.get(f"{self.base_url}/api/tags", timeout=1)  # Reduced from 2s to 1s
             return response.status_code == 200
         except:
             return False
@@ -31,7 +31,7 @@ class OllamaModelManager:
     def get_installed_models(self) -> List[Dict[str, any]]:
         """Get list of installed models from Ollama."""
         try:
-            response = requests.get(f"{self.base_url}/api/tags", timeout=5)
+            response = requests.get(f"{self.base_url}/api/tags", timeout=2)  # Reduced from 5s to 2s
             if response.status_code == 200:
                 data = response.json()
                 models = data.get('models', [])

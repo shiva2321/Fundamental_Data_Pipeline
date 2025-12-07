@@ -493,6 +493,10 @@ class MainWindow(QMainWindow):
         if hasattr(self, 'queue_log_text'):
             self.queue_log_text.append(formatted_msg)
 
+    def _toggle_all_models(self):
+        """Wrapper for toggle_all_models to match signal signature."""
+        self.toggle_all_models()
+
     def toggle_all_models(self):
         """Toggle only downloaded/available model checkboxes on/off."""
         select_all = self.chk_select_all_models.isChecked()
@@ -568,6 +572,10 @@ class MainWindow(QMainWindow):
         self.aggregator = UnifiedSECProfileAggregator(self.mongo, self.sec_client)
         self.ticker_fetcher = CompanyTickerFetcher()
         
+        # Initialize UI state dictionaries
+        self.model_checks = {}  # Dictionary to store model checkboxes
+        self.feature_checks = {}  # Dictionary to store feature checkboxes
+        self.installed_model_list = []  # List of installed Ollama models
 
         # Processing queue
         self.processing_queue = []  # List of ticker identifiers to process
@@ -741,174 +749,251 @@ class MainWindow(QMainWindow):
         h_filing_limit.addWidget(self.spin_filing_limit)
         opts_layout.addLayout(h_filing_limit)
 
-        # AI Model Selection
+        # AI Model Selection - Load from Ollama
         h_ai_model = QHBoxLayout()
-        h_ai_model.addWidget(QLabel("AI Model:"))
+        h_ai_model.addWidget(QLabel("Primary AI Model:"))
         self.combo_ai_model = QComboBox()
-        self.combo_ai_model.addItems(["llama3.2", "mistral", "llama2", "codellama", "phi", "gemma"])
-        current_model = self.config.get('profile_settings', {}).get('ai_model', 'llama3.2')
-        index = self.combo_ai_model.findText(current_model)
-        if index >= 0:
-            self.combo_ai_model.setCurrentIndex(index)
+
+        # Get installed models from Ollama
+        ai_model_list = []
+        try:
+            from src.utils.ollama_model_manager import OllamaModelManager
+            manager = OllamaModelManager()
+
+            if manager.is_ollama_running():
+                installed_models = manager.get_installed_models()
+                for model in installed_models:
+                    full_name = model.get('name', '')
+                    # For display, prefer base name unless there are multiple versions
+                    if ':' in full_name:
+                        base_name = full_name.split(':', 1)[0]
+                        ai_model_list.append(full_name)  # Store full name
+                    else:
+                        ai_model_list.append(full_name)
+
+                # Remove duplicates while preserving order
+                seen = set()
+                unique_models = []
+                for model in ai_model_list:
+                    base = model.split(':')[0]
+                    if base not in seen:
+                        seen.add(base)
+                        unique_models.append(base)
+
+                ai_model_list = unique_models
+
+            if not ai_model_list:
+                # Fallback to defaults
+                ai_model_list = ["llama3.2", "mistral", "llama2", "codellama", "phi", "gemma"]
+
+        except Exception as e:
+            logger.error(f"Error loading models for combo box: {e}")
+            ai_model_list = ["llama3.2", "mistral", "llama2", "codellama", "phi", "gemma"]
+
+        self.combo_ai_model.addItems(ai_model_list)
+        self.combo_ai_model.setToolTip("Primary model for single-model analysis")
         h_ai_model.addWidget(self.combo_ai_model)
         opts_layout.addLayout(h_ai_model)
 
-        # Multi-Model Analysis
-        multi_model_label = QLabel("Multi-Model Analysis (compare models):")
+        # Incremental Update Checkbox
+        self.chk_incremental = QCheckBox("Incremental Update (add new data only)")
+        self.chk_incremental.setChecked(False)
+        self.chk_incremental.setToolTip("If checked, only new filings will be added to existing profiles")
+        opts_layout.addWidget(self.chk_incremental)
+
+        # AI Enabled Checkbox
+        self.chk_ai_enabled = QCheckBox("Enable AI Analysis")
+        self.chk_ai_enabled.setChecked(self.config.get('profile_settings', {}).get('ai_enabled', True))
+        self.chk_ai_enabled.setToolTip("Enable multi-model AI analysis of company profiles")
+        opts_layout.addWidget(self.chk_ai_enabled)
+
+        # Multi-Model Selection Section
+        multi_model_label = QLabel("Multi-Model Analysis (select multiple for consensus):")
         multi_model_label.setStyleSheet("font-weight: bold; margin-top: 10px;")
         opts_layout.addWidget(multi_model_label)
 
-        # Select All Models checkbox
-        self.chk_select_all_models = QCheckBox("✓ Select All Available Models")
-        self.chk_select_all_models.setStyleSheet("font-weight: bold; color: #4da6ff;")
-        self.chk_select_all_models.clicked.connect(self.toggle_all_models)
-        opts_layout.addWidget(self.chk_select_all_models)
+        # Load available models from Ollama (with quick timeout to avoid UI freeze)
+        try:
+            from src.utils.ollama_model_manager import OllamaModelManager
+            manager = OllamaModelManager()
+            current_model = self.config.get('profile_settings', {}).get('ai_model', 'llama3.2')
 
-        self.model_checks = {}
-        available_models = ["llama3.2", "mistral", "llama2", "phi", "gemma", "codellama"]
-        for model in available_models:
-            chk = QCheckBox(model)
-            chk.setChecked(model == current_model)  # Default to current model selected
-            self.model_checks[model] = chk
-            opts_layout.addWidget(chk)
+            # Quick check - if this takes > 1s, skip and show placeholder
+            if manager.is_ollama_running():
+                installed_models = manager.get_installed_models()
 
-        multi_info = QLabel("ℹ Select multiple models to compare AI analysis side-by-side")
-        multi_info.setStyleSheet("color: #6c757d; font-size: 11px; font-style: italic;")
-        multi_info.setWordWrap(True)
-        opts_layout.addWidget(multi_info)
+                if installed_models:
+                    # Group models by family
+                    model_families = {}
+                    for model in installed_models:
+                        full_name = model.get('name', '')
+                        if ':' in full_name:
+                            base_name, tag = full_name.split(':', 1)
+                        else:
+                            base_name = full_name
+                            tag = 'latest'
 
-        # AI Enabled
-        self.chk_ai_enabled = QCheckBox("Enable AI Analysis During Profile Generation")
-        self.chk_ai_enabled.setChecked(self.config.get('profile_settings', {}).get('ai_enabled', True))
-        opts_layout.addWidget(self.chk_ai_enabled)
+                        if base_name not in model_families:
+                            model_families[base_name] = []
+                        model_families[base_name].append({
+                            'full_name': full_name,
+                            'tag': tag,
+                            'size': model.get('size', 0)
+                        })
 
-        # Incremental
-        self.chk_incremental = QCheckBox("Incremental Update (Merge new filings)")
-        self.chk_incremental.setChecked(self.config.get('profile_settings', {}).get('incremental_updates', False))
-        opts_layout.addWidget(self.chk_incremental)
+                    # Display checkboxes for each model (limit to first 10 to speed up UI)
+                    model_count = 0
+                    for base_name, versions in sorted(model_families.items()):
+                        if model_count >= 10:  # Limit initial display
+                            break
 
-        # Features (Collapsible)
-        self.feature_checks = {}
-        features = self.config.get('profile_settings', {}).get('included_features', {})
-        
-        for f_key, f_enabled in features.items():
-            chk = QCheckBox(f_key.replace('_', ' ').title())
-            chk.setChecked(f_enabled)
-            self.feature_checks[f_key] = chk
-            opts_layout.addWidget(chk)
-            
+                        if len(versions) == 1 and versions[0]['tag'] == 'latest':
+                            # Single version
+                            full_name = versions[0]['full_name']
+                            size_gb = versions[0]['size'] / (1024**3)
+                            chk = QCheckBox(f"{base_name}  ({size_gb:.1f} GB)")
+                            chk.setChecked(base_name == current_model or full_name == current_model)
+                            chk.setToolTip(f"Model: {full_name}\nSize: {size_gb:.2f} GB")
+                            self.model_checks[base_name] = chk
+                            self.installed_model_list.append(base_name)
+                            opts_layout.addWidget(chk)
+                            model_count += 1
+                        else:
+                            # Multiple versions - show family label
+                            family_label = QLabel(f"  {base_name} family:")
+                            family_label.setStyleSheet("color: #6c757d; font-size: 11px; font-style: italic;")
+                            opts_layout.addWidget(family_label)
+
+                            for version in sorted(versions, key=lambda x: x['tag'])[:3]:  # Limit to 3 versions
+                                full_name = version['full_name']
+                                tag = version['tag']
+                                size_gb = version['size'] / (1024**3)
+                                chk = QCheckBox(f"    • {base_name}:{tag}  ({size_gb:.1f} GB)")
+                                chk.setChecked(full_name == current_model or (base_name == current_model and tag == 'latest'))
+                                chk.setToolTip(f"Model: {full_name}\nSize: {size_gb:.2f} GB")
+                                model_key = full_name if tag != 'latest' else base_name
+                                self.model_checks[model_key] = chk
+                                self.installed_model_list.append(model_key)
+                                opts_layout.addWidget(chk)
+                                model_count += 1
+
+                    # Summary
+                    model_summary = QLabel(f"📊 {len(self.installed_model_list)} model(s) available")
+                    model_summary.setStyleSheet("color: #198754; font-size: 11px; font-weight: bold; margin-top: 5px;")
+                    opts_layout.addWidget(model_summary)
+
+                    # Select all button
+                    self.chk_select_all_models = QCheckBox("✓ Select All Models")
+                    self.chk_select_all_models.stateChanged.connect(self._toggle_all_models)
+                    opts_layout.addWidget(self.chk_select_all_models)
+                else:
+                    warning = QLabel("⚠ No models found - install models using Model Manager")
+                    warning.setStyleSheet("color: #ffc107; font-size: 11px;")
+                    opts_layout.addWidget(warning)
+            else:
+                warning = QLabel("⚠ Ollama not running - start Ollama to see available models")
+                warning.setStyleSheet("color: #ffc107; font-size: 11px;")
+                opts_layout.addWidget(warning)
+
+        except Exception as e:
+            logger.error(f"Error loading models: {e}")
+            # Don't block UI, just show warning
+            warning = QLabel("⚠ Error loading models (check logs)")
+            warning.setStyleSheet("color: #dc3545; font-size: 11px;")
+            opts_layout.addWidget(warning)
+
         left_layout.addWidget(grp_options)
         left_layout.addStretch()
 
         # Right Column: Quick Actions
         right_panel = QWidget()
         right_layout = QVBoxLayout(right_panel)
-        
+
         grp_quick = QGroupBox("Quick Actions")
         quick_layout = QVBoxLayout(grp_quick)
         
-        self.input_ticker = QLineEdit()
-        self.input_ticker.setPlaceholderText("Enter Ticker (e.g. AAPL) or CIK")
         quick_layout.addWidget(QLabel("Single Identifier:"))
+        self.input_ticker = QLineEdit()
+        self.input_ticker.setPlaceholderText("Ticker or CIK")
         quick_layout.addWidget(self.input_ticker)
-        
-        self.btn_add_single = QPushButton("Add to Queue")
-        self.btn_add_single.setObjectName("SuccessButton")
-        self.btn_add_single.clicked.connect(self.add_single_to_queue)
-        quick_layout.addWidget(self.btn_add_single)
 
-        quick_layout.addSpacing(10)
-        
+        btn_add_ticker = QPushButton("Add to Queue")
+        btn_add_ticker.setObjectName("PrimaryButton")
+        btn_add_ticker.clicked.connect(self.add_single_to_queue)
+        quick_layout.addWidget(btn_add_ticker)
+
+        quick_layout.addWidget(QLabel("Multiple Identifiers (one per line):"))
         self.input_batch = QTextEdit()
-        self.input_batch.setPlaceholderText("Paste comma-separated tickers here...\nAAPL, MSFT, GOOGL")
+        self.input_batch.setPlaceholderText("AAPL\nMSFT\n0000789019")
         self.input_batch.setMaximumHeight(100)
-        quick_layout.addWidget(QLabel("Batch Processing:"))
         quick_layout.addWidget(self.input_batch)
-        
-        self.btn_add_batch = QPushButton("Add All to Queue")
-        self.btn_add_batch.setObjectName("SuccessButton")
-        self.btn_add_batch.clicked.connect(self.add_batch_to_queue)
-        quick_layout.addWidget(self.btn_add_batch)
 
-        quick_layout.addSpacing(15)
-        
-        # Bulk Selection
-        quick_layout.addWidget(QLabel("Bulk Selection:"))
-        
-        bulk_h1 = QHBoxLayout()
+        btn_add_batch = QPushButton("Add Batch to Queue")
+        btn_add_batch.setObjectName("PrimaryButton")
+        btn_add_batch.clicked.connect(self.add_batch_to_queue)
+        quick_layout.addWidget(btn_add_batch)
+
+        quick_layout.addWidget(QLabel("Random Selection:"))
         self.spin_top_n = QSpinBox()
-        self.spin_top_n.setRange(1, 100000)
+        self.spin_top_n.setRange(1, 500)
         self.spin_top_n.setValue(10)
-        self.spin_top_n.setMaximumWidth(80)
-        bulk_h1.addWidget(QLabel("N ="))
-        bulk_h1.addWidget(self.spin_top_n)
-        quick_layout.addLayout(bulk_h1)
-        
-        self.btn_top_n_random = QPushButton("Add Top N Random Tickers")
-        self.btn_top_n_random.setObjectName("SuccessButton")
-        self.btn_top_n_random.clicked.connect(self.add_top_n_random)
-        quick_layout.addWidget(self.btn_top_n_random)
-        
-        self.btn_top_n = QPushButton("Add Top N Tickers (by Market Cap)")
-        self.btn_top_n.setObjectName("SuccessButton")
-        self.btn_top_n.clicked.connect(self.add_top_n)
-        quick_layout.addWidget(self.btn_top_n)
-        
+        quick_layout.addWidget(self.spin_top_n)
+
+        btn_random = QPushButton("Add Random Tickers")
+        btn_random.clicked.connect(self.add_top_n_random)
+        quick_layout.addWidget(btn_random)
+
+        btn_top_n = QPushButton("Add Top N by Market Cap")
+        btn_top_n.clicked.connect(self.add_top_n)
+        quick_layout.addWidget(btn_top_n)
+
         right_layout.addWidget(grp_quick)
 
-        # Pipeline Execution Logs in Dashboard (expandable)
-        dashboard_logs_group = QGroupBox("Pipeline Execution Logs")
-        dashboard_logs_layout = QVBoxLayout(dashboard_logs_group)
+        # Pipeline Execution Logs in Dashboard (on right side, below Quick Actions)
+        grp_logs = QGroupBox("Pipeline Execution Logs")
+        logs_layout = QVBoxLayout(grp_logs)
+
         self.dashboard_log_text = QTextEdit()
         self.dashboard_log_text.setReadOnly(True)
-        self.dashboard_log_text.setMinimumHeight(150)  # Minimum height only, can expand
-        dashboard_logs_layout.addWidget(self.dashboard_log_text)
+        self.dashboard_log_text.setMaximumHeight(200)
+        logs_layout.addWidget(self.dashboard_log_text)
 
-        btn_clear_dashboard_logs = QPushButton("Clear Logs")
-        btn_clear_dashboard_logs.setObjectName("SecondaryButton")
-        btn_clear_dashboard_logs.clicked.connect(self.dashboard_log_text.clear)
-        dashboard_logs_layout.addWidget(btn_clear_dashboard_logs, alignment=Qt.AlignRight)
+        btn_clear_logs = QPushButton("Clear Logs")
+        btn_clear_logs.setObjectName("SecondaryButton")
+        btn_clear_logs.clicked.connect(self.dashboard_log_text.clear)
+        logs_layout.addWidget(btn_clear_logs, alignment=Qt.AlignRight)
 
-        right_layout.addWidget(dashboard_logs_group)
-        # Right layout will now stretch to fill available space
+        right_layout.addWidget(grp_logs)
+        right_layout.addStretch()
 
         # Add panels to splitter
         self.dashboard_splitter.addWidget(left_panel)
         self.dashboard_splitter.addWidget(right_panel)
 
-        # Set initial sizes (equal split)
-        self.dashboard_splitter.setSizes([500, 500])
-
-        # Restore saved sizes if available
+        # Restore splitter sizes if available
         saved_sizes = self.config.get('ui_settings', {}).get('dashboard_splitter_sizes', [])
         if saved_sizes:
             self.dashboard_splitter.setSizes(saved_sizes)
-
-        # Connect to save state
-        self.dashboard_splitter.splitterMoved.connect(self._save_splitter_state)
+        else:
+            # Default split: 60% left, 40% right
+            total_width = self.dashboard_splitter.width()
+            self.dashboard_splitter.setSizes([int(total_width * 0.6), int(total_width * 0.4)])
 
         layout.addWidget(self.dashboard_splitter)
-
         return tab
 
     def create_queue_monitor_tab(self):
-        """NEW: Queue monitoring tab with pause/resume/cancel controls."""
+        """Create the queue monitor tab with controls and queue table."""
         tab = QWidget()
         layout = QVBoxLayout(tab)
 
         # Controls
         ctrl_layout = QHBoxLayout()
-        
-        btn_pause = QPushButton("Pause Selected")
-        btn_pause.setObjectName("WarningButton")
-        btn_pause.clicked.connect(self.pause_selected_ticker)
-        ctrl_layout.addWidget(btn_pause)
-        
+
         btn_resume = QPushButton("Resume Selected")
         btn_resume.setObjectName("SuccessButton")
         btn_resume.clicked.connect(self.resume_selected_ticker)
         ctrl_layout.addWidget(btn_resume)
-        
         btn_cancel = QPushButton("Cancel Selected")
         btn_cancel.setObjectName("DangerButton")
         btn_cancel.clicked.connect(self.cancel_selected_ticker)
@@ -956,12 +1041,41 @@ class MainWindow(QMainWindow):
         tab = QWidget()
         layout = QVBoxLayout(tab)
 
+        # Search Bar
+        search_layout = QHBoxLayout()
+        search_layout.addWidget(QLabel("Search:"))
+        self.profile_search = QLineEdit()
+        self.profile_search.setPlaceholderText("Search by Ticker, Name, or CIK...")
+        self.profile_search.textChanged.connect(self.filter_profiles)
+        search_layout.addWidget(self.profile_search)
+
+        btn_clear_search = QPushButton("Clear")
+        btn_clear_search.setObjectName("SecondaryButton")
+        btn_clear_search.clicked.connect(lambda: self.profile_search.clear())
+        search_layout.addWidget(btn_clear_search)
+        layout.addLayout(search_layout)
+
+        # Selection Mode Toggle
+        mode_layout = QHBoxLayout()
+        mode_layout.addWidget(QLabel("Selection Mode:"))
+        self.chk_multi_select = QCheckBox("Enable Multi-Select (Batch Operations)")
+        self.chk_multi_select.setChecked(False)  # Start in single-select mode
+        self.chk_multi_select.stateChanged.connect(self.toggle_selection_mode)
+        mode_layout.addWidget(self.chk_multi_select)
+        mode_layout.addStretch()
+        layout.addLayout(mode_layout)
+
         # Controls
         ctrl_layout = QHBoxLayout()
         self.btn_refresh_profiles = QPushButton("Refresh List")
         self.btn_refresh_profiles.clicked.connect(self.load_profiles)
         ctrl_layout.addWidget(self.btn_refresh_profiles)
         
+        self.btn_find_problematic = QPushButton("Find Problematic Profiles")
+        self.btn_find_problematic.setObjectName("WarningButton")
+        self.btn_find_problematic.clicked.connect(self.find_problematic_profiles)
+        ctrl_layout.addWidget(self.btn_find_problematic)
+
         self.btn_view_profile = QPushButton("View Selected")
         self.btn_view_profile.setObjectName("SecondaryButton")
         self.btn_view_profile.clicked.connect(self.view_profile)
@@ -986,7 +1100,12 @@ class MainWindow(QMainWindow):
         self.btn_delete_profile.setObjectName("DangerButton")
         self.btn_delete_profile.clicked.connect(self.delete_profile)
         ctrl_layout.addWidget(self.btn_delete_profile)
-        
+
+        self.btn_clear_selection = QPushButton("Clear Selection")
+        self.btn_clear_selection.setObjectName("SecondaryButton")
+        self.btn_clear_selection.clicked.connect(self.clear_profile_selection)
+        ctrl_layout.addWidget(self.btn_clear_selection)
+
         ctrl_layout.addStretch()
         layout.addLayout(ctrl_layout)
 
@@ -996,9 +1115,12 @@ class MainWindow(QMainWindow):
         self.profiles_table.setHorizontalHeaderLabels(["Ticker", "Name", "CIK", "Last Generated", "Period From", "Period To"])
         self.profiles_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
         self.profiles_table.setSelectionBehavior(QTableWidget.SelectRows)
-        self.profiles_table.setSelectionMode(QTableWidget.MultiSelection)  # Enable multi-selection
-        self.profiles_table.doubleClicked.connect(self.visualize_profile)  # Double-click to visualize
+        self.profiles_table.setSelectionMode(QTableWidget.SingleSelection)  # Start in single-select mode
+        self.profiles_table.doubleClicked.connect(self.visualize_profile_and_clear)  # Double-click to visualize
         layout.addWidget(self.profiles_table)
+
+        # Store the multi-select preference
+        self.multi_select_mode = False
 
         return tab
 
@@ -1686,7 +1808,7 @@ class MainWindow(QMainWindow):
         
         ticker = self.queue_table.item(selected_rows[0].row(), 0).text()
         status = self.queue_table.item(selected_rows[0].row(), 1).text()
-        
+
         if status == TickerStatus.FAILED.value:
             self.task_queue.put({
                 'action': 'generate_profiles',
@@ -1752,6 +1874,10 @@ class MainWindow(QMainWindow):
         l.addWidget(btns)
         
         dlg.exec()
+        
+        # Auto-clear selection in single-select mode
+        if not self.multi_select_mode:
+            self.profiles_table.clearSelection()
 
     def edit_profile(self):
         rows = self.profiles_table.selectionModel().selectedRows()
@@ -1780,6 +1906,10 @@ class MainWindow(QMainWindow):
         l.addWidget(btns)
         
         dlg.exec()
+        
+        # Auto-clear selection in single-select mode
+        if not self.multi_select_mode:
+            self.profiles_table.clearSelection()
 
     def save_profile_edit(self, dlg, cik, text):
         try:
@@ -1848,8 +1978,161 @@ class MainWindow(QMainWindow):
                               f"Period: {from_date} to {to_date}\n"
                               f"Mode: {'Incremental' if incremental else 'Full Regeneration'}")
 
+    def toggle_selection_mode(self):
+        """Toggle between single-select and multi-select modes."""
+        self.multi_select_mode = self.chk_multi_select.isChecked()
+
+        if self.multi_select_mode:
+            self.profiles_table.setSelectionMode(QTableWidget.MultiSelection)
+            self.log_message("Profile Manager: Switched to Multi-Select mode (batch operations enabled)")
+        else:
+            self.profiles_table.setSelectionMode(QTableWidget.SingleSelection)
+            self.profiles_table.clearSelection()  # Clear any previous selections
+            self.log_message("Profile Manager: Switched to Single-Select mode (auto-clear after action)")
+
+    def filter_profiles(self):
+        """Filter profiles table based on search text."""
+        search_text = self.profile_search.text().lower()
+
+        for row in range(self.profiles_table.rowCount()):
+            should_show = False
+
+            if not search_text:
+                should_show = True
+            else:
+                # Search in Ticker, Name, and CIK columns
+                for col in [0, 1, 2]:  # Ticker, Name, CIK
+                    item = self.profiles_table.item(row, col)
+                    if item and search_text in item.text().lower():
+                        should_show = True
+                        break
+
+            self.profiles_table.setRowHidden(row, not should_show)
+
+    def find_problematic_profiles(self):
+        """Find and display profiles with issues (incomplete, missing data, etc.)."""
+        col_name = self.config['collections']['profiles']
+
+        try:
+            # Fetch all profiles using find() instead of find_all()
+            all_profiles = self.mongo.find(col_name, {})
+
+            if not all_profiles:
+                QMessageBox.information(self, "No Profiles", "No profiles found in the database.")
+                return
+
+            problematic = []
+
+            for profile in all_profiles:
+                issues = []
+                ticker = profile.get('company_info', {}).get('ticker', 'Unknown')
+                cik = profile.get('cik', 'Unknown')
+
+                # Check for missing financial data
+                financials = profile.get('financial_data', {})
+                if not financials or len(financials) == 0:
+                    issues.append("No financial data")
+                elif len(financials) < 3:
+                    issues.append(f"Limited financial data ({len(financials)} metrics)")
+
+                # Check for N/A or missing key metrics
+                for key in ['Revenues', 'Assets', 'NetIncomeLoss']:
+                    if key in financials:
+                        data_points = financials[key]
+                        if not data_points or len(data_points) == 0:
+                            issues.append(f"Missing {key}")
+                        elif len(data_points) < 4:
+                            issues.append(f"Insufficient {key} data ({len(data_points)} periods)")
+
+                # Check AI analysis quality
+                ai_analysis = profile.get('ai_analysis', {})
+                if not ai_analysis:
+                    issues.append("Missing AI analysis")
+                else:
+                    consensus = ai_analysis.get('consensus_analysis', {})
+                    if not consensus or consensus.get('investment_thesis', 'N/A') == 'N/A':
+                        issues.append("Poor AI analysis quality")
+
+                # Check for missing governance data
+                governance = profile.get('governance', {})
+                if not governance or governance.get('total_proxy_count', 0) == 0:
+                    issues.append("No governance data")
+
+                # Check for missing insider trading data
+                insider_trading = profile.get('insider_trading', {})
+                if not insider_trading or insider_trading.get('total_form4_count', 0) == 0:
+                    issues.append("No insider trading data")
+
+                if issues:
+                    problematic.append({
+                        'ticker': ticker,
+                        'cik': cik,
+                        'issues': issues
+                    })
+
+            if not problematic:
+                QMessageBox.information(self, "All Good!",
+                                       f"All {len(all_profiles)} profiles appear to be complete and healthy.")
+                return
+
+            # Display problematic profiles
+            msg = f"Found {len(problematic)} problematic profile(s) out of {len(all_profiles)} total:\n\n"
+
+            for item in problematic[:10]:  # Show first 10
+                msg += f"• {item['ticker']} (CIK: {item['cik']})\n"
+                msg += f"  Issues: {', '.join(item['issues'][:3])}\n\n"
+
+            if len(problematic) > 10:
+                msg += f"...and {len(problematic) - 10} more\n\n"
+
+            msg += "\nWould you like to retry these profiles?"
+
+            result = QMessageBox.question(self, "Problematic Profiles Found", msg,
+                                         QMessageBox.Yes | QMessageBox.No)
+
+            if result == QMessageBox.Yes:
+                # Queue retry for problematic profiles
+                tickers = [p['ticker'] for p in problematic if p['ticker'] != 'Unknown']
+
+                if tickers:
+                    self.log_message(f"Queuing retry for {len(tickers)} problematic profiles...")
+
+                    # Get options from profile settings
+                    options = {
+                        'lookback_years': self.config.get('profile_settings', {}).get('lookback_years', 10),
+                        'filing_limit': self.config.get('profile_settings', {}).get('filing_limit'),
+                        'incremental': False,  # Full regeneration for problematic profiles
+                        'ai_enabled': self.config.get('profile_settings', {}).get('ai_enabled', True),
+                        'config': self.config
+                    }
+
+                    self.task_queue.put({
+                        'action': 'generate_profiles',
+                        'identifiers': tickers,
+                        'options': options,
+                        'collection': self.config['collections']['profiles']
+                    })
+
+                    QMessageBox.information(self, "Retry Queued",
+                                           f"Queued {len(tickers)} profiles for regeneration.")
+
+        except Exception as e:
+            logger.exception("Error finding problematic profiles")
+            QMessageBox.critical(self, "Error", f"Failed to analyze profiles: {e}")
+
+    def clear_profile_selection(self):
+        """Manually clear the current profile selection."""
+        self.profiles_table.clearSelection()
+        self.log_message("Profile selection cleared")
+
+    def visualize_profile_and_clear(self):
+        """Visualize profile and auto-clear selection if in single-select mode."""
+        self.visualize_profile()
+        if not self.multi_select_mode:
+            self.profiles_table.clearSelection()
+
     def visualize_profile(self):
-        """NEW: Open visualization window for selected profile(s)."""
+        """Open visualization window for selected profile(s)."""
         rows = self.profiles_table.selectionModel().selectedRows()
         if not rows:
             QMessageBox.warning(self, "No Selection", "Please select at least one profile to visualize.")
@@ -1873,6 +2156,10 @@ class MainWindow(QMainWindow):
             except Exception as e:
                 QMessageBox.critical(self, "Visualization Error", f"Failed to open visualization for {cik}: {e}")
                 logger.exception("Visualization error")
+
+        # Auto-clear selection in single-select mode
+        if not self.multi_select_mode:
+            self.profiles_table.clearSelection()
 
     def delete_profile(self):
         """Delete selected profile(s)."""
@@ -1906,8 +2193,10 @@ class MainWindow(QMainWindow):
 
             QMessageBox.information(self, "Deletion Complete", f"Deleted {deleted} profile(s).")
             self.load_profiles()
-            self.log_message(f"Deleted profile {cik}")
-            self.load_profiles()
+            
+            # Auto-clear selection in single-select mode
+            if not self.multi_select_mode:
+                self.profiles_table.clearSelection()
 
     def save_settings(self):
         self.config['mongodb']['uri'] = self.input_mongo_uri.text()
@@ -2037,19 +2326,26 @@ class MainWindow(QMainWindow):
         self._check_ollama_status()
 
     def _check_ollama_status(self):
-        """Check Ollama status and update the status indicator."""
+        """Check Ollama status and update the status indicator (fast version)."""
         try:
             from src.utils.ollama_model_manager import OllamaModelManager
             manager = OllamaModelManager()
 
+            # Fast check - only verify if running, don't fetch all models
             if manager.is_ollama_running():
-                models = manager.get_installed_models()
-                model_count = len(models)
+                # Use cached model count if available from previous load
+                model_count = len(self.installed_model_list) if hasattr(self, 'installed_model_list') and self.installed_model_list else 0
+
+                # Only fetch models if we don't have cached data
+                if model_count == 0:
+                    try:
+                        models = manager.get_installed_models()
+                        model_count = len(models)
+                    except:
+                        model_count = 0
 
                 if model_count > 0:
                     self.lbl_ollama_status.setText(f"Ollama: ✓ Running ({model_count} models)")
-                    # White text on green background - inline style with !important doesn't work in Qt,
-                    # so we set the full style including all properties
                     self.lbl_ollama_status.setStyleSheet(
                         "QPushButton#OllamaStatusButton { "
                         "background-color: #198754; color: white; font-weight: bold; "
@@ -2059,7 +2355,6 @@ class MainWindow(QMainWindow):
                     )
                 else:
                     self.lbl_ollama_status.setText("Ollama: ⚠ Running (No models)")
-                    # Dark text on orange background
                     self.lbl_ollama_status.setStyleSheet(
                         "QPushButton#OllamaStatusButton { "
                         "background-color: #ffc107; color: #000; font-weight: bold; "
@@ -2069,7 +2364,6 @@ class MainWindow(QMainWindow):
                     )
             else:
                 self.lbl_ollama_status.setText("Ollama: ✗ Not Running")
-                # White text on red background
                 self.lbl_ollama_status.setStyleSheet(
                     "QPushButton#OllamaStatusButton { "
                     "background-color: #dc3545; color: white; font-weight: bold; "
@@ -2079,7 +2373,7 @@ class MainWindow(QMainWindow):
                 )
         except Exception as e:
             self.lbl_ollama_status.setText("Ollama: ? Unknown")
-            # White text on gray background (default from global stylesheet)
+            logger.error(f"Error checking Ollama status: {e}")
             self.lbl_ollama_status.setStyleSheet(
                 "QPushButton#OllamaStatusButton { "
                 "background-color: #6c757d; color: white; font-weight: bold; "
@@ -2138,4 +2432,4 @@ def main():
 
 if __name__ == "__main__":
     main()
- 
+

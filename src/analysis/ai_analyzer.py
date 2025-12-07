@@ -102,7 +102,7 @@ class OllamaAIAnalyzer:
             insider_trading, institutional
         )
         
-        # Call Ollama API
+        # Call Ollama API with increased timeout and retry logic
         try:
             response = requests.post(
                 self.ollama_url,
@@ -110,9 +110,14 @@ class OllamaAIAnalyzer:
                     "model": self.model,
                     "prompt": prompt,
                     "stream": False,
-                    "format": "json"
+                    "format": "json",
+                    "options": {
+                        "num_predict": 2048,  # Limit response length
+                        "temperature": 0.7,
+                        "top_p": 0.9
+                    }
                 },
-                timeout=30
+                timeout=60  # 60 seconds timeout
             )
             
             if response.status_code == 200:
@@ -133,8 +138,12 @@ class OllamaAIAnalyzer:
                 logger.warning(f"Ollama API returned {response.status_code}. Model '{self.model}' may not be installed. Run: ollama pull {self.model}")
                 return self._analyze_rule_based(profile)
                 
+        except requests.exceptions.ReadTimeout:
+            # Timeout is expected for large models like mixtral
+            logger.warning(f"Ollama request timed out after 60s for model {self.model} - using fallback analysis")
+            return self._analyze_rule_based(profile)
         except Exception as e:
-            logger.exception("Ollama request failed")
+            logger.warning(f"Ollama request failed for model {self.model}: {str(e)[:100]} - using fallback analysis")
             return self._analyze_rule_based(profile)
     
     def _create_analysis_prompt(self, company_info, latest_financials, ratios, 
@@ -230,10 +239,18 @@ Insider Trading Activity (Form 4):
 
         # Institutional ownership section with DETAILED DATA
         institutional_section = ""
-        if institutional and institutional.get('total_sc13_count', 0) > 0:
+
+        # Initialize variables to avoid UnboundLocalError
+        total_sc13 = 0
+        activist_count = 0
+        interest_level = "Unknown"
+
+        if institutional:
             total_sc13 = institutional.get('total_sc13_count', 0)
             activist_count = institutional.get('activist_count', 0)
             interest_level = institutional.get('institutional_interest', 'Unknown')
+
+        if total_sc13 > 0 and institutional:
             insights = institutional.get('insights', [])
 
             # Add detailed ownership data if available
@@ -259,6 +276,12 @@ Institutional Ownership (SC 13D/G):
 - Activist investors (SC 13D): {activist_count}
 - Institutional interest: {interest_level}
 - Key insights: {'; '.join(insights[:3]) if insights else 'Limited data'}
+"""
+        else:
+            institutional_section = f"""
+Institutional Ownership (SC 13D/G):
+- Total SC 13 filings: 0
+- Limited institutional data available
 """
 
         # Corporate governance section with DETAILED DATA
@@ -294,14 +317,6 @@ Institutional Ownership (SC 13D/G):
 Corporate Governance (DEF 14A) - DETAILED ANALYSIS:
 - Proxy statements filed: {proxy_count}
 - Governance score: {gov_score}/100{comp_info}{board_info}
-- Key insights: {'; '.join(insights[:3]) if insights else 'Limited data'}
-"""
-
-            institutional_section = f"""
-Institutional Ownership (SC 13D/G):
-- Total SC 13 filings: {total_sc13}
-- Activist investors (SC 13D): {activist_count}
-- Institutional interest: {interest_level}
 - Key insights: {'; '.join(insights[:3]) if insights else 'Limited data'}
 """
 

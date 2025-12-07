@@ -14,14 +14,13 @@ A comprehensive Python-based desktop application for analyzing SEC EDGAR company
 - **Time Series Analysis**: Historical trends, growth rates, volatility metrics
 - **Financial Ratios**: ROE, ROA, debt-to-equity, profit margins, and more
 - **Health Scoring**: Comprehensive 0-100 health score with profitability, leverage, and growth components
-
-### 🔍 **Advanced Filing Analysis** 
+### 🔍 **Advanced Filing Analysis**
 - **Material Events (8-K)**: Corporate events, management changes, accounting issues
 - **Insider Trading (Form 4)**: Buy/sell transactions with dollar amounts and signals
 - **Institutional Ownership (SC 13D/G)**: Activist investors, ownership percentages, intentions
 - **Corporate Governance (DEF 14A)**: CEO compensation, pay ratios, board independence
 - **Key Persons**: Executives, board members, insider holdings with active status tracking
-
+- **Intelligent Fallback**: Automatic format detection and parsing strategy selection
 ### 🤖 **AI-Powered Insights**
 - **Local LLM Integration**: Uses Ollama (llama3.2, mistral, phi, etc.)
 - **Multi-Model Analysis**: Compare recommendations across different AI models
@@ -29,7 +28,7 @@ A comprehensive Python-based desktop application for analyzing SEC EDGAR company
 - **Investment Recommendations**: Buy/Sell/Hold with confidence scores
 - **Risk Assessment**: Multi-source risk analysis
 - **Catalyst Identification**: Identifies growth opportunities
-
+- **Quality Metrics**: Per-form extraction quality scoring and validation
 ### 📊 **Interactive Visualizations**
 - **Financial Trends**: Revenue, assets, liabilities, net income over time
 - **Growth Analysis**: Period-over-period growth rates with interactive charts
@@ -46,6 +45,7 @@ A comprehensive Python-based desktop application for analyzing SEC EDGAR company
 - **Incremental Updates**: Update existing profiles with new data
 - **Profile Manager**: View, edit, delete, and visualize profiles
 - **Export Options**: Export profiles as JSON
+- **Automated Validation**: Quick parser import and functionality checks
 
 ---
 
@@ -61,7 +61,6 @@ Fundamental_Data_Pipeline/
 │   │   ├── form_8k_parser.py
 │   │   ├── sc13_parser.py
 │   │   ├── filing_content_parser.py
-│   │   └── key_persons_parser.py
 │   ├── clients/           # External service clients
 │   │   ├── sec_edgar_api_client.py
 │   │   ├── mongo_client.py
@@ -91,6 +90,7 @@ Fundamental_Data_Pipeline/
 ├── requirements.txt      # Python dependencies
 ├── run.bat              # Windows launcher
 └── run.sh               # Linux/Mac launcher
+└── requirements.txt    # Python dependencies
 ```
 
 ---
@@ -101,13 +101,13 @@ Fundamental_Data_Pipeline/
 
 ```bash
 # Python 3.8+ required
-python --version
 
 # MongoDB required (local or cloud)
 # Download from: https://www.mongodb.com/try/download/community
 
 # Ollama required for AI features (optional)
 # Download from: https://ollama.ai
+python --version
 ```
 
 ### Installation
@@ -119,26 +119,25 @@ cd Fundamental_Data_Pipeline
 
 # 2. Create virtual environment
 python -m venv .venv
-
 # 3. Activate virtual environment
 # Windows:
-.venv\Scripts\activate
+# 3. Activate virtual environment (Windows)
 # Linux/Mac:
 source .venv/bin/activate
+.venv\Scripts\activate
 
 # 4. Install dependencies
-pip install -r requirements.txt
 
 # 5. Install Ollama models (for AI features)
 ollama pull llama3.2
 ollama pull mistral
 ollama pull phi
+pip install -r requirements.txt
 ```
-
 ### Configuration
-
+### Fetch Sample Filings
 Edit `config/config.yaml`:
-
+python try.py
 ```yaml
 mongodb:
   uri: "mongodb://localhost:27017/"
@@ -149,35 +148,35 @@ profile_settings:
   ai_enabled: true
   ai_model: "llama3.2"
   email_notifications: false
+# This will download sample filings to sec_filings/
 ```
-
 ### Running the Application
+### Run Tests
 
-```bash
 # Windows
 run.bat
-
+python validate_all_parsers.py
 # Linux/Mac
 ./run.sh
-
+python test_parsers_offline.py
 # Or directly
 python main.py
-```
+python integrated_fetch_parse_test.py --ticker AAPL
+- `Forms/` - 150+ form parsers
 
 ---
-
 ## 📖 Usage Guide
-
+```
 ### 1. **Generate Company Profiles**
-
+```
 1. Click **Dashboard_Generate** tab
 2. Enter ticker symbols (e.g., `AAPL, MSFT, GOOGL`)
 3. Click **Add to Queue**
 4. Click **Start Processing**
 5. Monitor progress in Queue Monitor tab
-
+python test_parsers_offline.py
 ### 2. **View Profiles**
-
+python integrated_fetch_parse_test.py --ticker AAPL
 1. Click **Profile Manager** tab
 2. Select a profile from the list
 3. Click **Visualize Selected**
@@ -189,34 +188,34 @@ python main.py
    - **Growth Analysis**: Period-over-period growth rates
    - **Health Indicators**: Detailed health scoring breakdown
    - **AI/ML Analysis**: AI-powered investment insights
-
+```
 ### 3. **AI Analysis**
-
+4. Update quality metrics
 **Multi-Model Analysis:**
 1. Go to Settings tab
 2. Enable AI analysis
 3. Select multiple models (llama3.2, mistral, phi, llama2)
 4. Generate profiles
 5. AI/ML Analysis tab shows consensus and individual model recommendations
-
+---
 **Single Model:**
 - Set one model in config
 - Get faster analysis from that model
-
+## 📊 Current Status
 ### 4. **Interactive Charts**
-
+**Forms Tested**: 10-K, 10-Q, 8-K, 3, 4, 5, DEF 14A, SC 13G, and 140+ more
 - **Hover**: See exact values on data points
 - **Double-click**: Open chart in interactive window
 - **Zoom**: Scroll wheel to zoom in/out
 - **Pan**: Click and drag to pan
 - **Reset**: Home button to reset view
+See [TEST_RESULTS_SUMMARY.md](TEST_RESULTS_SUMMARY.md) for detailed results.
 
 ---
-
 ## 🏗️ Architecture
-
+## 🎯 Roadmap
 ### Core Components
-
+- [ ] REST API for parser access
 ```
 Fundamental_Data_Pipeline/
 ├── desktop_app_pyside.py          # Main application (PySide6)
@@ -231,6 +230,7 @@ Fundamental_Data_Pipeline/
 │   ├── form4_parser.py            # Insider trading (Form 4)
 │   ├── sc13_parser.py             # Institutional ownership (SC 13D/G)
 │   ├── def14a_parser.py           # Corporate governance (DEF 14A)
+
 │   ├── key_persons_parser.py      # Key persons extraction (executives, board, insiders, holdings)
 │   └── filing_content_parser.py   # Content fetching & parsing
 │
