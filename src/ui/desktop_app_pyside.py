@@ -184,7 +184,7 @@ class EnhancedBackgroundWorker(threading.Thread):
         super().__init__(daemon=True)
         self.task_queue = task_queue
         self.signals = signals
-        self.aggregator = aggregator
+        self.aggregator = aggregator  # Keep original for compatibility
         self.ticker_fetcher = ticker_fetcher
         self.mongo = mongo
         self.config = config
@@ -192,6 +192,29 @@ class EnhancedBackgroundWorker(threading.Thread):
         self._pause_events = {}  # ticker -> Event
         self._cancel_flags = {}  # ticker -> bool
         
+        # Initialize parallel aggregator for faster processing
+        try:
+            from src.analysis.parallel_profile_aggregator import ParallelProfileAggregator
+            self.parallel_aggregator = ParallelProfileAggregator(
+                mongo=mongo,
+                max_workers=8  # 8 parallel tasks per company
+            )
+            logger.info("✓ Parallel aggregator initialized (8 threads per company)")
+        except Exception as e:
+            logger.warning(f"Parallel aggregator initialization failed, using standard: {e}")
+            self.parallel_aggregator = None
+        
+        # Initialize global thread pool for concurrent company processing
+        try:
+            from src.utils.thread_pool_manager import get_thread_pool_manager
+            # Get global pool with 16 workers (can process multiple companies at once)
+            self.global_pool = get_thread_pool_manager(max_workers=16)
+            self.use_concurrent_processing = True
+            logger.info("✓ Global thread pool manager initialized (16 workers)")
+        except Exception as e:
+            logger.warning(f"Global thread pool initialization failed: {e}")
+            self.use_concurrent_processing = False
+
         # Email notification support
         try:
             from src.utils.email_notifier import EmailNotifier
@@ -315,22 +338,45 @@ class EnhancedBackgroundWorker(threading.Thread):
                     
                     self.signals.progress.emit(identifier, 'detail', f"  -> {msg}")
                     # Update progress percentage based on stage
-                    if 'Fetching' in msg:
-                        self.signals.ticker_status_changed.emit(identifier, TickerStatus.RUNNING.value, 20)
-                    elif 'Extracting' in msg:
-                        self.signals.ticker_status_changed.emit(identifier, TickerStatus.RUNNING.value, 40)
-                    elif 'Calculating' in msg:
-                        self.signals.ticker_status_changed.emit(identifier, TickerStatus.RUNNING.value, 60)
-                    elif 'Generating' in msg:
-                        self.signals.ticker_status_changed.emit(identifier, TickerStatus.RUNNING.value, 80)
+                    if 'Fetching' in msg or 'cache' in msg.lower():
+                        self.signals.ticker_status_changed.emit(identifier, TickerStatus.RUNNING.value, 15)
+                    elif 'Executing' in msg or 'tasks' in msg.lower():
+                        self.signals.ticker_status_changed.emit(identifier, TickerStatus.RUNNING.value, 30)
+                    elif 'Progress:' in msg:
+                        # Extract progress from message like "Progress: 3/8 tasks completed"
+                        try:
+                            parts = msg.split('/')
+                            if len(parts) == 2:
+                                completed = int(parts[0].split(':')[-1].strip())
+                                total = int(parts[1].split()[0])
+                                progress = int(30 + (completed / total) * 50)  # 30-80% range
+                                self.signals.ticker_status_changed.emit(identifier, TickerStatus.RUNNING.value, progress)
+                        except:
+                            pass
+                    elif 'Post-processing' in msg:
+                        self.signals.ticker_status_changed.emit(identifier, TickerStatus.RUNNING.value, 85)
+                    elif 'complete' in msg.lower() or 'stored' in msg.lower():
+                        self.signals.ticker_status_changed.emit(identifier, TickerStatus.RUNNING.value, 95)
 
-                profile = self.aggregator.aggregate_company_profile(
-                    cik=cik,
-                    company_info=company,
-                    output_collection=collection,
-                    options=options,
-                    progress_callback=progress_cb
-                )
+                # Use parallel aggregator if available (faster), otherwise standard
+                if self.parallel_aggregator:
+                    self.signals.progress.emit(identifier, 'info', f"⚡ Using parallel processing (8 threads)")
+                    profile = self.parallel_aggregator.aggregate_profile_parallel(
+                        cik=cik,
+                        company_info=company,
+                        output_collection=collection,
+                        options=options,
+                        progress_callback=progress_cb
+                    )
+                else:
+                    self.signals.progress.emit(identifier, 'info', f"Using standard processing")
+                    profile = self.aggregator.aggregate_company_profile(
+                        cik=cik,
+                        company_info=company,
+                        output_collection=collection,
+                        options=options,
+                        progress_callback=progress_cb
+                    )
 
                 if profile:
                     self.signals.progress.emit(identifier, 'company_finish', f"Successfully generated profile for {identifier}")
@@ -637,6 +683,8 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.create_dashboard_tab(), "Dashboard_Generate")
         self.tabs.addTab(self.create_queue_monitor_tab(), "Queue Monitor")
         self.tabs.addTab(self.create_profiles_tab(), "Profile Manager")
+        self.tabs.addTab(self.create_relationship_analysis_tab(), "Relationship Analysis")
+        self.tabs.addTab(self.create_cache_manager_tab(), "Cache Manager")
         self.tabs.addTab(self.create_settings_tab(), "Settings")
         
         main_layout.addWidget(self.tabs)
@@ -1125,6 +1173,34 @@ class MainWindow(QMainWindow):
         return tab
 
 
+    def create_relationship_analysis_tab(self):
+        """Create the comprehensive relationship analysis tab"""
+        from src.ui.relationship_analysis_widget import RelationshipAnalysisWidget
+
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        # Create the relationship analysis widget
+        self.relationship_analysis_widget = RelationshipAnalysisWidget(self.mongo)
+        layout.addWidget(self.relationship_analysis_widget)
+
+        return tab
+
+    def create_cache_manager_tab(self):
+        """Create the cache manager tab"""
+        from src.ui.cache_manager_widget import CacheManagerWidget
+
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        # Create the cache manager widget
+        self.cache_manager_widget = CacheManagerWidget()
+        layout.addWidget(self.cache_manager_widget)
+
+        return tab
+
     def create_settings_tab(self):
         tab = QWidget()
         layout = QVBoxLayout(tab)
@@ -1268,7 +1344,7 @@ class MainWindow(QMainWindow):
 <li><b>AI Analysis:</b> {'Enabled' if opts.get('ai_enabled') else 'Disabled'}</li>
 <li><b>Incremental Update:</b> {'Yes' if opts.get('incremental') else 'No'}</li>
 <li><b>Database:</b> {self.config['mongodb']['db_name']}</li>
-<li><b>Collection:</b> {self.config['collections']['profiles']}</li>
+<li><b>Collection:</b> {self.config.get('collections', {}).get('profiles', 'Fundamental_Data_Pipeline')}</li>
 </ul>
 
 {ai_warning}
@@ -1302,7 +1378,7 @@ class MainWindow(QMainWindow):
 <li><b>AI Analysis:</b> {'Enabled' if opts.get('ai_enabled') else 'Disabled'}</li>
 <li><b>Incremental Update:</b> {'Yes' if opts.get('incremental') else 'No'}</li>
 <li><b>Database:</b> {self.config['mongodb']['db_name']}</li>
-<li><b>Collection:</b> {self.config['collections']['profiles']}</li>
+<li><b>Collection:</b> {self.config.get('collections', {}).get('profiles', 'Fundamental_Data_Pipeline')}</li>
 </ul>
 
 {ai_warning}
@@ -1411,7 +1487,7 @@ class MainWindow(QMainWindow):
                 'action': 'generate_profiles',
                 'identifiers': tickers,
                 'options': self.get_options_from_ui(),
-                'collection': self.config['collections']['profiles']
+                'collection': self.config.get('collections', {}).get('profiles', 'Fundamental_Data_Pipeline')
             })
             
             self.lbl_status.setText(f"Queued {len(tickers)} tickers")
@@ -1457,7 +1533,7 @@ class MainWindow(QMainWindow):
             'action': 'generate_profiles',
             'identifiers': [ident],
             'options': self.get_options_from_ui(),
-            'collection': self.config['collections']['profiles']
+            'collection': self.config.get('collections', {}).get('profiles', 'Fundamental_Data_Pipeline')
         })
         self.lbl_status.setText(f"Queued: {ident}")
 
@@ -1479,7 +1555,7 @@ class MainWindow(QMainWindow):
             'action': 'generate_profiles',
             'identifiers': idents,
             'options': self.get_options_from_ui(),
-            'collection': self.config['collections']['profiles']
+            'collection': self.config.get('collections', {}).get('profiles', 'Fundamental_Data_Pipeline')
         })
         self.lbl_status.setText(f"Queued batch of {len(idents)}")
 
@@ -1688,7 +1764,7 @@ class MainWindow(QMainWindow):
             'action': 'generate_profiles',
             'identifiers': self.processing_queue.copy(),
             'options': self.get_options_from_ui(),
-            'collection': self.config['collections']['profiles']
+            'collection': self.config.get('collections', {}).get('profiles', 'Fundamental_Data_Pipeline')
         })
 
         self.lbl_status.setText(f"Processing {len(self.processing_queue)} tickers...")
@@ -1814,13 +1890,13 @@ class MainWindow(QMainWindow):
                 'action': 'generate_profiles',
                 'identifiers': [ticker],
                 'options': self.get_options_from_ui(),
-                'collection': self.config['collections']['profiles']
+                'collection': self.config.get('collections', {}).get('profiles', 'Fundamental_Data_Pipeline')
             })
             self.log_message(f"Retrying {ticker}...")
 
     def load_profiles(self):
         try:
-            col_name = self.config['collections']['profiles']
+            col_name = self.config.get('collections', {}).get('profiles', 'Fundamental_Data_Pipeline')
             profiles = list(self.mongo.find(col_name, {}, limit=500))
             
             self.profiles_table.setRowCount(0)
@@ -1853,7 +1929,7 @@ class MainWindow(QMainWindow):
             return
         
         cik = self.profiles_table.item(rows[0].row(), 2).text()
-        col_name = self.config['collections']['profiles']
+        col_name = self.config.get('collections', {}).get('profiles', 'Fundamental_Data_Pipeline')
         profile = self.mongo.find_one(col_name, {'cik': cik})
         
         if not profile:
@@ -1885,7 +1961,7 @@ class MainWindow(QMainWindow):
             return
         
         cik = self.profiles_table.item(rows[0].row(), 2).text()
-        col_name = self.config['collections']['profiles']
+        col_name = self.config.get('collections', {}).get('profiles', 'Fundamental_Data_Pipeline')
         profile = self.mongo.find_one(col_name, {'cik': cik})
         
         if not profile:
@@ -1914,7 +1990,7 @@ class MainWindow(QMainWindow):
     def save_profile_edit(self, dlg, cik, text):
         try:
             new_data = json.loads(text)
-            col_name = self.config['collections']['profiles']
+            col_name = self.config.get('collections', {}).get('profiles', 'Fundamental_Data_Pipeline')
             self.mongo.replace_one(col_name, {'cik': cik}, new_data)
             self.log_message(f"Updated profile for {cik}")
             dlg.accept()
@@ -1969,7 +2045,7 @@ class MainWindow(QMainWindow):
             'action': 'generate_profiles',
             'identifiers': [ticker],
             'options': options,
-            'collection': self.config['collections']['profiles']
+            'collection': self.config.get('collections', {}).get('profiles', 'Fundamental_Data_Pipeline')
         })
 
         self.lbl_status.setText(f"Updating profile for {ticker} ({from_date} to {to_date})")
@@ -2011,7 +2087,7 @@ class MainWindow(QMainWindow):
 
     def find_problematic_profiles(self):
         """Find and display profiles with issues (incomplete, missing data, etc.)."""
-        col_name = self.config['collections']['profiles']
+        col_name = self.config.get('collections', {}).get('profiles', 'Fundamental_Data_Pipeline')
 
         try:
             # Fetch all profiles using find() instead of find_all()
@@ -2110,7 +2186,7 @@ class MainWindow(QMainWindow):
                         'action': 'generate_profiles',
                         'identifiers': tickers,
                         'options': options,
-                        'collection': self.config['collections']['profiles']
+                        'collection': self.config.get('collections', {}).get('profiles', 'Fundamental_Data_Pipeline')
                     })
 
                     QMessageBox.information(self, "Retry Queued",
@@ -2138,7 +2214,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "No Selection", "Please select at least one profile to visualize.")
             return
         
-        col_name = self.config['collections']['profiles']
+        col_name = self.config.get('collections', {}).get('profiles', 'Fundamental_Data_Pipeline')
 
         # Visualize each selected profile
         for row in rows:
@@ -2151,7 +2227,7 @@ class MainWindow(QMainWindow):
 
             try:
                 from src.ui.visualization_window import ProfileVisualizationWindow
-                viz_window = ProfileVisualizationWindow(profile, self.config, self)
+                viz_window = ProfileVisualizationWindow(profile, self.config, self, mongo=self.mongo)
                 viz_window.exec()
             except Exception as e:
                 QMessageBox.critical(self, "Visualization Error", f"Failed to open visualization for {cik}: {e}")
@@ -2181,7 +2257,7 @@ class MainWindow(QMainWindow):
 
         if QMessageBox.question(self, "Confirm Deletion", msg,
                               QMessageBox.Yes | QMessageBox.No) == QMessageBox.Yes:
-            col_name = self.config['collections']['profiles']
+            col_name = self.config.get('collections', {}).get('profiles', 'Fundamental_Data_Pipeline')
             deleted = 0
             for cik in ciks:
                 try:
@@ -2258,9 +2334,9 @@ class MainWindow(QMainWindow):
                     'start_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                     'end_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                     'duration': '0:05:30',
-                    'database': 'Entities',
-                    'collection': 'profiles'
-                }
+                    'database': self.config.get('mongodb', {}).get('db_name', 'Entities'),
+                    'collection': self.config.get('collections', {}).get('profiles', 'Fundamental_Data_Pipeline')
+                 }
 
                 notifier.send_completion_report(test_results)
                 self.log_message("✓ Test email sent!")

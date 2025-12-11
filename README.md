@@ -8,6 +8,14 @@ A comprehensive Python-based desktop application for analyzing SEC EDGAR company
 
 ## 🌟 Key Features
 
+### ⚡ **High-Performance Parallel Processing** (NEW)
+- **8x Faster Processing**: Multi-threaded task execution reduces processing time by up to 800%
+- **Non-Blocking UI**: Application remains fully responsive during long-running operations
+- **Smart Thread Management**: Global thread pool manager optimizes resource utilization
+- **Concurrent Ticker Processing**: Multiple companies processed simultaneously
+- **Task-Level Parallelization**: Independent tasks (8-K parsing, Form 4 analysis, etc.) run concurrently
+- **Graceful Cancellation**: Stop processing at any time without data corruption
+
 ### 📈 **Complete Financial Analysis**
 - **Automated Data Collection**: Fetches all historical SEC filings (10-K, 10-Q, 8-K, DEF 14A, Form 4, SC 13D/G)
 - **Financial Metrics**: Revenue, assets, liabilities, equity, net income, cash flow
@@ -19,9 +27,18 @@ A comprehensive Python-based desktop application for analyzing SEC EDGAR company
 - **Insider Trading (Form 4)**: Buy/sell transactions with dollar amounts and signals
 - **Institutional Ownership (SC 13D/G)**: Activist investors, ownership percentages, intentions
 - **Corporate Governance (DEF 14A)**: CEO compensation, pay ratios, board independence
+- **10-K/10-Q Narratives**: Business overview, risk factors, MD&A, market risks
 - **Key Persons**: Executives, board members, insider holdings with active status tracking
 - **Intelligent Fallback**: Automatic format detection and parsing strategy selection
-### 🤖 **AI-Powered Insights**
+- **Dual Parser System**: 124+ legacy form parsers + modern focused parsers for key filings
+
+### 🛡️ **Quality Control & Error Management**
+- **Profile Validation**: Automatic detection of incomplete/inconsistent profiles
+- **Failure Tracking**: Detailed error categorization and retry management
+- **Quality Scoring**: Per-profile quality metrics and data completeness indicators
+- **Problematic Profile Detection**: UI for identifying and retrying incomplete profiles
+- **Failed Ticker Management**: View, retry, or delete failed processing attempts
+- **Issue Categorization**: Groups issues by type (INCOMPLETE, INCONSISTENT, OUT_OF_ORDER, IMPROPER)
 - **Local LLM Integration**: Uses Ollama (llama3.2, mistral, phi, etc.)
 - **Multi-Model Analysis**: Compare recommendations across different AI models
 - **Comprehensive Prompts**: Includes financial data + events + governance + insider trading
@@ -55,12 +72,14 @@ A comprehensive Python-based desktop application for analyzing SEC EDGAR company
 Fundamental_Data_Pipeline/
 ├── main.py                 # Application entry point
 ├── src/                    # Source code package
-│   ├── parsers/           # SEC filing parsers
-│   │   ├── def14a_parser.py
-│   │   ├── form4_parser.py
-│   │   ├── form_8k_parser.py
-│   │   ├── sc13_parser.py
-│   │   ├── filing_content_parser.py
+│   ├── parsers/           # SEC filing parsers (modern focused parsers)
+│   │   ├── def14a_parser.py       # Corporate governance parser
+│   │   ├── form4_parser.py        # Insider trading parser
+│   │   ├── form_8k_parser.py      # Material events parser
+│   │   ├── sc13_parser.py         # Institutional ownership parser
+│   │   ├── ten_k_parser.py        # 10-K/10-Q narrative parser (NEW)
+│   │   ├── key_persons_parser.py  # Key persons extractor (NEW)
+│   │   └── filing_content_parser.py
 │   ├── clients/           # External service clients
 │   │   ├── sec_edgar_api_client.py
 │   │   ├── mongo_client.py
@@ -69,14 +88,29 @@ Fundamental_Data_Pipeline/
 │   │   ├── desktop_app_pyside.py
 │   │   ├── visualization_window.py
 │   │   ├── ollama_manager_dialog.py
-│   │   └── profile_period_editor.py
+│   │   ├── profile_period_editor.py
+│   │   ├── failed_tickers_dialog.py      # Failed ticker management (NEW)
+│   │   └── problematic_profiles_dialog.py # Profile quality dialog (NEW)
 │   ├── analysis/         # Data analysis modules
 │   │   ├── ai_analyzer.py
-│   │   └── unified_profile_aggregator.py
-│   └── utils/            # Utility modules
-│       ├── config.py
-│       ├── email_notifier.py
-│       └── ollama_model_manager.py
+│   │   ├── unified_profile_aggregator.py
+│   │   ├── parallel_profile_aggregator.py  # Parallel processing (NEW)
+│   │   └── batch_profile_processor.py      # Batch queue processing (NEW)
+│   ├── utils/            # Utility modules
+│   │   ├── config.py
+│   │   ├── email_notifier.py
+│   │   ├── ollama_model_manager.py
+│   │   ├── failure_tracker.py      # Failure tracking system (NEW)
+│   │   ├── profile_validator.py    # Profile validation system (NEW)
+│   │   └── thread_pool_manager.py  # Global thread pool manager (NEW)
+│   └── fetchers/          # Data fetchers
+├── Forms/                # Legacy comprehensive parser system
+│   ├── baseParser.py     # 124+ form type parsers
+│   ├── form10parser.py   # Includes 10-K, 10-Q, etc.
+│   ├── form3parser.py, form4parser.py, form5parser.py
+│   ├── schedule13Dparser.py, schedule13Gparser.py
+│   ├── proxyparser.py    # DEF 14A
+│   └── ... (100+ other form parsers)
 ├── config/               # Configuration files
 │   └── config.yaml
 ├── docs/                 # Documentation
@@ -88,10 +122,28 @@ Fundamental_Data_Pipeline/
 │   └── QUICK_REFERENCE_KEY_PERSONS.md
 ├── tools/                # Testing and utility scripts
 ├── requirements.txt      # Python dependencies
+├── validation_report.json # Parser validation results
 ├── run.bat              # Windows launcher
 └── run.sh               # Linux/Mac launcher
-└── requirements.txt    # Python dependencies
 ```
+
+---
+
+## 📖 Documentation
+
+Comprehensive documentation is available in the `docs/` directory:
+
+| Document | Description |
+|----------|-------------|
+| [GETTING_STARTED.md](docs/GETTING_STARTED.md) | Step-by-step setup and first profile generation |
+| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Technical architecture, system components, and data flow |
+| [DATA_DICTIONARY.md](docs/DATA_DICTIONARY.md) | Complete reference for all data points and metrics |
+| [CHANGELOG.md](docs/CHANGELOG.md) | Version history and recent changes |
+| [PARALLEL_PROCESSING_IMPLEMENTATION.md](PARALLEL_PROCESSING_IMPLEMENTATION.md) | **NEW**: Parallel processing architecture and performance |
+| [QUALITY_CONTROL.md](docs/QUALITY_CONTROL.md) | Profile validation and error management guide |
+| [NARRATIVE_PARSER_GUIDE.md](docs/NARRATIVE_PARSER_GUIDE.md) | 10-K/10-Q narrative section extraction guide |
+| [KEY_PERSONS_FINAL_FIX.md](docs/KEY_PERSONS_FINAL_FIX.md) | Key persons parser implementation details |
+| [AI_SETUP_GUIDE.md](docs/AI_SETUP_GUIDE.md) | AI/ML setup with Ollama |
 
 ---
 

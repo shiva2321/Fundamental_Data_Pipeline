@@ -1,0 +1,627 @@
+{
+  "total_parsers": 124,
+  "valid_parsers": 124,
+  "invalid_parsers": 0,
+  "details": [
+    {
+      "form_type": "1-A",
+      "status": "passed",
+      "parser_class": "Form1AParser"
+    },
+    {
+      "form_type": "1-A/A",
+      "status": "passed",
+      "parser_class": "Form1AParser"
+    },
+    {
+      "form_type": "10-K",
+      "status": "passed",
+      "parser_class": "Form10KParser"
+    },
+    {
+      "form_type": "10-K/A",
+      "status": "passed",
+      "parser_class": "Form10KParser"
+    },
+    {
+      "form_type": "10-Q",
+      "status": "passed",
+      "parser_class": "Form10QParser"
+    },
+    {
+      "form_type": "10-Q/A",
+      "status": "passed",
+      "parser_class": "Form10QParser"
+    },
+    {
+      "form_type": "11-K",
+      "status": "passed",
+      "parser_class": "Form11KParser"
+    },
+    {
+      "form_type": "11-K/A",
+      "status": "passed",
+      "parser_class": "Form11KParser"
+    },
+    {
+      "form_type": "12b-25",
+      "status": "passed",
+      "parser_class": "Form12b25Parser"
+    },
+    {
+      "form_type": "144",
+      "status": "passed",
+      "parser_class": "Form144Parser"
+    },
+    {
+      "form_type": "144/A",
+      "status": "passed",
+      "parser_class": "Form144AParser"
+    },
+    {
+      "form_type": "15",
+      "status": "passed",
+      "parser_class": "Form15Parser"
+    },
+    {
+      "form_type": "15F",
+      "status": "passed",
+      "parser_class": "Form15FParser"
+    },
+    {
+      "form_type": "18-K",
+      "status": "passed",
+      "parser_class": "Form18KParser"
+    },
+    {
+      "form_type": "20-F",
+      "status": "passed",
+      "parser_class": "Form20FParser"
+    },
+    {
+      "form_type": "20-F/A",
+      "status": "passed",
+      "parser_class": "Form20FParser"
+    },
+    {
+      "form_type": "25",
+      "status": "passed",
+      "parser_class": "Form25Parser"
+    },
+    {
+      "form_type": "25-NSE",
+      "status": "passed",
+      "parser_class": "Form25Parser"
+    },
+    {
+      "form_type": "3",
+      "status": "passed",
+      "parser_class": "Form3Parser"
+    },
+    {
+      "form_type": "3/A",
+      "status": "passed",
+      "parser_class": "Form3Parser"
+    },
+    {
+      "form_type": "4",
+      "status": "passed",
+      "parser_class": "Form4Parser"
+    },
+    {
+      "form_type": "4/A",
+      "status": "passed",
+      "parser_class": "Form4Parser"
+    },
+    {
+      "form_type": "40-F",
+      "status": "passed",
+      "parser_class": "Form40FParser"
+    },
+    {
+      "form_type": "40-F/A",
+      "status": "passed",
+      "parser_class": "Form40FParser"
+    },
+    {
+      "form_type": "424A",
+      "status": "passed",
+      "parser_class": "Form424AParser"
+    },
+    {
+      "form_type": "424B1",
+      "status": "passed",
+      "parser_class": "Form424B1Parser"
+    },
+    {
+      "form_type": "424B2",
+      "status": "passed",
+      "parser_class": "Form424B2Parser"
+    },
+    {
+      "form_type": "424B3",
+      "status": "passed",
+      "parser_class": "Form424B3Parser"
+    },
+    {
+      "form_type": "424B4",
+      "status": "passed",
+      "parser_class": "Form424B4Parser"
+    },
+    {
+      "form_type": "424B5",
+      "status": "passed",
+      "parser_class": "Form424B5Parser"
+    },
+    {
+      "form_type": "424H",
+      "status": "passed",
+      "parser_class": "Form424HParser"
+    },
+    {
+      "form_type": "5",
+      "status": "passed",
+      "parser_class": "Form5Parser"
+    },
+    {
+      "form_type": "6-K",
+      "status": "passed",
+      "parser_class": "Form6KParser"
+    },
+    {
+      "form_type": "6-K/A",
+      "status": "passed",
+      "parser_class": "Form6KParser"
+    },
+    {
+      "form_type": "8-A12B",
+      "status": "passed",
+      "parser_class": "Form8A12BParser"
+    },
+    {
+      "form_type": "8-K",
+      "status": "passed",
+      "parser_class": "Form8KParser"
+    },
+    {
+      "form_type": "8-K/A",
+      "status": "passed",
+      "parser_class": "Form8KAParser"
+    },
+    {
+      "form_type": "ARS",
+      "status": "passed",
+      "parser_class": "ARSParser"
+    },
+    {
+      "form_type": "C",
+      "status": "passed",
+      "parser_class": "FormCParser"
+    },
+    {
+      "form_type": "C/A",
+      "status": "passed",
+      "parser_class": "FormCParser"
+    },
+    {
+      "form_type": "CERT",
+      "status": "passed",
+      "parser_class": "CERTParser"
+    },
+    {
+      "form_type": "CERTNYS",
+      "status": "passed",
+      "parser_class": "CERTNYSParser"
+    },
+    {
+      "form_type": "CORRESP",
+      "status": "passed",
+      "parser_class": "CORRESPParser"
+    },
+    {
+      "form_type": "D",
+      "status": "passed",
+      "parser_class": "FormDParser"
+    },
+    {
+      "form_type": "D/A",
+      "status": "passed",
+      "parser_class": "FormDParser"
+    },
+    {
+      "form_type": "DEF 14A",
+      "status": "passed",
+      "parser_class": "DEF14AParser"
+    },
+    {
+      "form_type": "DEF 14C",
+      "status": "passed",
+      "parser_class": "DEF14CParser"
+    },
+    {
+      "form_type": "DEFA14A",
+      "status": "passed",
+      "parser_class": "DEFA14AParser"
+    },
+    {
+      "form_type": "DEFM14A",
+      "status": "passed",
+      "parser_class": "DEFM14AParser"
+    },
+    {
+      "form_type": "DEFR14A",
+      "status": "passed",
+      "parser_class": "DEFR14AParser"
+    },
+    {
+      "form_type": "EFFECT",
+      "status": "passed",
+      "parser_class": "EFFECTParser"
+    },
+    {
+      "form_type": "F-1",
+      "status": "passed",
+      "parser_class": "F1Parser"
+    },
+    {
+      "form_type": "F-1/A",
+      "status": "passed",
+      "parser_class": "F1Parser"
+    },
+    {
+      "form_type": "F-10",
+      "status": "passed",
+      "parser_class": "F10Parser"
+    },
+    {
+      "form_type": "F-10/A",
+      "status": "passed",
+      "parser_class": "F10Parser"
+    },
+    {
+      "form_type": "F-2",
+      "status": "passed",
+      "parser_class": "F2Parser"
+    },
+    {
+      "form_type": "F-2/A",
+      "status": "passed",
+      "parser_class": "F2Parser"
+    },
+    {
+      "form_type": "F-3",
+      "status": "passed",
+      "parser_class": "F3Parser"
+    },
+    {
+      "form_type": "F-3/A",
+      "status": "passed",
+      "parser_class": "F3Parser"
+    },
+    {
+      "form_type": "F-4",
+      "status": "passed",
+      "parser_class": "F4Parser"
+    },
+    {
+      "form_type": "F-4/A",
+      "status": "passed",
+      "parser_class": "F4Parser"
+    },
+    {
+      "form_type": "F-6",
+      "status": "passed",
+      "parser_class": "F6Parser"
+    },
+    {
+      "form_type": "F-6/A",
+      "status": "passed",
+      "parser_class": "F6Parser"
+    },
+    {
+      "form_type": "F-8",
+      "status": "passed",
+      "parser_class": "F8Parser"
+    },
+    {
+      "form_type": "F-8/A",
+      "status": "passed",
+      "parser_class": "F8Parser"
+    },
+    {
+      "form_type": "FWP",
+      "status": "passed",
+      "parser_class": "FWPParser"
+    },
+    {
+      "form_type": "IRANNOTICE",
+      "status": "passed",
+      "parser_class": "IRANNOTICEParser"
+    },
+    {
+      "form_type": "N-14",
+      "status": "passed",
+      "parser_class": "N14Parser"
+    },
+    {
+      "form_type": "N-14/A",
+      "status": "passed",
+      "parser_class": "N14Parser"
+    },
+    {
+      "form_type": "N-1A",
+      "status": "passed",
+      "parser_class": "N1AParser"
+    },
+    {
+      "form_type": "N-2",
+      "status": "passed",
+      "parser_class": "N2Parser"
+    },
+    {
+      "form_type": "N-23C-1",
+      "status": "passed",
+      "parser_class": "N23C1Parser"
+    },
+    {
+      "form_type": "N-3",
+      "status": "passed",
+      "parser_class": "N3Parser"
+    },
+    {
+      "form_type": "N-3/A",
+      "status": "passed",
+      "parser_class": "N3Parser"
+    },
+    {
+      "form_type": "N-4",
+      "status": "passed",
+      "parser_class": "N4Parser"
+    },
+    {
+      "form_type": "N-4/A",
+      "status": "passed",
+      "parser_class": "N4Parser"
+    },
+    {
+      "form_type": "N-5",
+      "status": "passed",
+      "parser_class": "N5Parser"
+    },
+    {
+      "form_type": "N-6",
+      "status": "passed",
+      "parser_class": "N6Parser"
+    },
+    {
+      "form_type": "N-6/A",
+      "status": "passed",
+      "parser_class": "N6Parser"
+    },
+    {
+      "form_type": "N-8A",
+      "status": "passed",
+      "parser_class": "N8AParser"
+    },
+    {
+      "form_type": "N-8B-2",
+      "status": "passed",
+      "parser_class": "N8B2Parser"
+    },
+    {
+      "form_type": "N-CEN",
+      "status": "passed",
+      "parser_class": "NCENParser"
+    },
+    {
+      "form_type": "N-CSR",
+      "status": "passed",
+      "parser_class": "NCSRParser"
+    },
+    {
+      "form_type": "N-CSRS",
+      "status": "passed",
+      "parser_class": "NCSRParser"
+    },
+    {
+      "form_type": "N-PORT",
+      "status": "passed",
+      "parser_class": "NPORTParser"
+    },
+    {
+      "form_type": "N-PX",
+      "status": "passed",
+      "parser_class": "NPXParser"
+    },
+    {
+      "form_type": "N-Q",
+      "status": "passed",
+      "parser_class": "NQParser"
+    },
+    {
+      "form_type": "NO ACT",
+      "status": "passed",
+      "parser_class": "NOACTParser"
+    },
+    {
+      "form_type": "NT 10-K",
+      "status": "passed",
+      "parser_class": "NT10KParser"
+    },
+    {
+      "form_type": "NT 10-K/A",
+      "status": "passed",
+      "parser_class": "NT10KParser"
+    },
+    {
+      "form_type": "NT 10-Q",
+      "status": "passed",
+      "parser_class": "NT10QParser"
+    },
+    {
+      "form_type": "NT 10-Q/A",
+      "status": "passed",
+      "parser_class": "NT10QParser"
+    },
+    {
+      "form_type": "POS 462B",
+      "status": "passed",
+      "parser_class": "POS462BParser"
+    },
+    {
+      "form_type": "POS 462C",
+      "status": "passed",
+      "parser_class": "POS462CParser"
+    },
+    {
+      "form_type": "POS AM",
+      "status": "passed",
+      "parser_class": "POSAMParser"
+    },
+    {
+      "form_type": "POS EX",
+      "status": "passed",
+      "parser_class": "POSEXParser"
+    },
+    {
+      "form_type": "POSASR",
+      "status": "passed",
+      "parser_class": "POSASRParser"
+    },
+    {
+      "form_type": "PRE 14A",
+      "status": "passed",
+      "parser_class": "PRE14AParser"
+    },
+    {
+      "form_type": "PX14A6G",
+      "status": "passed",
+      "parser_class": "PX14A6GParser"
+    },
+    {
+      "form_type": "PX14A6N",
+      "status": "passed",
+      "parser_class": "PX14A6NParser"
+    },
+    {
+      "form_type": "RW",
+      "status": "passed",
+      "parser_class": "RWParser"
+    },
+    {
+      "form_type": "RW WD",
+      "status": "passed",
+      "parser_class": "RWParser"
+    },
+    {
+      "form_type": "S-1",
+      "status": "passed",
+      "parser_class": "S1Parser"
+    },
+    {
+      "form_type": "S-1/A",
+      "status": "passed",
+      "parser_class": "S1Parser"
+    },
+    {
+      "form_type": "S-11",
+      "status": "passed",
+      "parser_class": "S11Parser"
+    },
+    {
+      "form_type": "S-11/A",
+      "status": "passed",
+      "parser_class": "S11Parser"
+    },
+    {
+      "form_type": "S-3",
+      "status": "passed",
+      "parser_class": "S3Parser"
+    },
+    {
+      "form_type": "S-3/A",
+      "status": "passed",
+      "parser_class": "S3Parser"
+    },
+    {
+      "form_type": "S-3ASR",
+      "status": "passed",
+      "parser_class": "S3ASRParser"
+    },
+    {
+      "form_type": "S-4",
+      "status": "passed",
+      "parser_class": "S4Parser"
+    },
+    {
+      "form_type": "S-4/A",
+      "status": "passed",
+      "parser_class": "S4Parser"
+    },
+    {
+      "form_type": "S-8",
+      "status": "passed",
+      "parser_class": "S8Parser"
+    },
+    {
+      "form_type": "S-8 POS",
+      "status": "passed",
+      "parser_class": "S8POSParser"
+    },
+    {
+      "form_type": "SC 13D",
+      "status": "passed",
+      "parser_class": "Schedule13DParser"
+    },
+    {
+      "form_type": "SC 13D/A",
+      "status": "passed",
+      "parser_class": "Schedule13DAParser"
+    },
+    {
+      "form_type": "SC 13G",
+      "status": "passed",
+      "parser_class": "SC13GParser"
+    },
+    {
+      "form_type": "SC 13G/A",
+      "status": "passed",
+      "parser_class": "SC13GAParser"
+    },
+    {
+      "form_type": "SC 14D9",
+      "status": "passed",
+      "parser_class": "SC14D9Parser"
+    },
+    {
+      "form_type": "SC TO",
+      "status": "passed",
+      "parser_class": "SCTOParser"
+    },
+    {
+      "form_type": "SC TO-I",
+      "status": "passed",
+      "parser_class": "SCTO_IParser"
+    },
+    {
+      "form_type": "SC TO-T",
+      "status": "passed",
+      "parser_class": "SCTO_TParser"
+    },
+    {
+      "form_type": "SCHEDULE 13G/A",
+      "status": "passed",
+      "parser_class": "Schedule13GAParser"
+    },
+    {
+      "form_type": "SD",
+      "status": "passed",
+      "parser_class": "FormSDParser"
+    },
+    {
+      "form_type": "UPLOAD",
+      "status": "passed",
+      "parser_class": "UPLOADParser"
+    }
+  ]
+}

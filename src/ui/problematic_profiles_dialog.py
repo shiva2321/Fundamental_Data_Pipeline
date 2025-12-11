@@ -22,7 +22,7 @@ class ProblematicProfilesDialog(QDialog):
         self.mongo = mongo
         self.config = config
         self.problematic_profiles = []
-        self.col_name = config.get('collections', {}).get('profiles', 'profiles')
+        self.col_name = config.get('collections', {}).get('profiles', 'Fundamental_Data_Pipeline')
 
         self.setWindowTitle("Problematic Profiles - Find & Retry")
         self.resize(1200, 700)
@@ -408,4 +408,3 @@ This profile should be regenerated to fix the identified issues.
         if reply == QMessageBox.Yes:
             self.retry_profiles.emit(tickers)
             self.accept()
-

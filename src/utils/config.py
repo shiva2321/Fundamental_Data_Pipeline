@@ -47,7 +47,7 @@ class Config:
             },
             "collections": {  # Added collections section
                 "minute_data": "minutebyminute",
-                "profiles": "profiles",
+                "profiles": "Fundamental_Data_Pipeline",
                 "daily_data": "dailydata",
                 "fundamentals": "fundamentals",
                 "sentiment": "sentiment"
@@ -126,6 +126,14 @@ class Config:
             # Merge configs (file overrides defaults)
             if file_config:
                 self._merge_configs(config, file_config)
+                # Normalize legacy collection names (support backward compatibility)
+                try:
+                    col_val = config.get('collections', {}).get('profiles')
+                    if col_val in (None, 'profiles', 'sec_profiles', 'sec_profiles'):
+                        config.setdefault('collections', {})['profiles'] = 'Fundamental_Data_Pipeline'
+                except Exception:
+                    # If anything goes wrong, ensure fallback is present
+                    config.setdefault('collections', {})['profiles'] = 'Fundamental_Data_Pipeline'
         except Exception as e:
             print(f"Error loading config from {self.config_file}: {e}")
 

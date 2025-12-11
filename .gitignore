@@ -49,6 +49,11 @@ logs/
 # Cache
 .cache/
 *.cache
+cache/
+
+# Validation reports
+validation_report.json
+test_output.txt
 *.pyc
 
 # Data files

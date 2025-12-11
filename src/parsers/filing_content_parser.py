@@ -34,6 +34,7 @@ class SECFilingContentFetcher:
     def fetch_filing_content(self, cik: str, accession_number: str, max_retries: int = 3) -> Optional[str]:
         """
         Fetch the actual filing content (HTML/XML).
+        Content is cached for future use to avoid re-fetching from SEC.
 
         Args:
             cik: Company CIK
@@ -43,6 +44,16 @@ class SECFilingContentFetcher:
         Returns:
             Filing content as string or None if failed
         """
+        # Try cache first
+        try:
+            from src.utils.filing_cache import get_filing_cache
+            cache = get_filing_cache()
+            cached_content = cache.get_cached_filing_content(cik, accession_number)
+            if cached_content:
+                return cached_content
+        except Exception as e:
+            logger.debug(f"Could not check cache: {e}")
+
         # Clean accession number (remove dashes for URL)
         accession_clean = accession_number.replace('-', '')
         cik_clean = cik.lstrip('0')
@@ -63,7 +74,17 @@ class SECFilingContentFetcher:
                     response = self.session.get(url, timeout=30)
 
                     if response.status_code == 200:
-                        return response.text
+                        content = response.text
+
+                        # Cache the content for future use
+                        try:
+                            from src.utils.filing_cache import get_filing_cache
+                            cache = get_filing_cache()
+                            cache.cache_filing_content(cik, accession_number, content)
+                        except Exception as e:
+                            logger.debug(f"Could not cache content: {e}")
+
+                        return content
 
                 except Exception as e:
                     logger.debug(f"Attempt {attempt + 1} failed for {url}: {e}")

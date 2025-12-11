@@ -392,7 +392,230 @@ def fetch_filing_content(cik, accession_number):
 
 ---
 
-### 6. **AI Analyzer** (`ai_analyzer.py`)
+#### **10-K/10-Q Parser** (`ten_k_parser.py`) **[NEW]**
+
+**Purpose**: Extract narrative sections from annual/quarterly reports for qualitative analysis
+
+**Process**:
+1. Filter 10-K and 10-Q filings
+2. Fetch filing content (HTML/XML)
+3. Extract key sections using regex patterns:
+   - Section 1: Business Overview
+   - Section 1A: Risk Factors
+   - Section 7: Management's Discussion and Analysis (MD&A)
+   - Section 7A: Market Risk Disclosures
+   - Section 8: Financial Statements
+4. Perform keyword analysis on each section
+5. Calculate section-level metrics (word count, keyword density)
+6. Aggregate insights across multiple reports
+
+**Keyword Tracking**:
+- risk, litigation, cyber, regulatory, liquidity
+- macroeconomic, revenue, cash, debt
+
+**Output**:
+```python
+{
+    'total_reports': 4,
+    'forms_seen': {'10-K': 2, '10-Q': 2},
+    'reports': [
+        {
+            'form': '10-K',
+            'filing_date': '2024-02-15',
+            'sections': {
+                '1': {
+                    'summary': {
+                        'word_count': 5432,
+                        'keyword_counts': {'revenue': 45, 'cash': 23}
+                    },
+                    'text': '...'
+                },
+                '1A': {
+                    'summary': {
+                        'word_count': 12543,
+                        'keyword_counts': {'risk': 312, 'litigation': 45}
+                    },
+                    'text': '...'
+                }
+            },
+            'insights': {
+                'risk_intensity': 'High',
+                'business_complexity': 'Moderate'
+            }
+        }
+    ],
+    'risk_summary': {
+        'average_word_count': 11234,
+        'keyword_mentions': 856
+    },
+    'mdna_summary': {
+        'average_word_count': 8765,
+        'keyword_mentions': 234
+    }
+}
+```
+
+---
+
+#### **Key Persons Parser** (`key_persons_parser.py`) **[NEW]**
+
+**Purpose**: Comprehensive extraction of key company personnel including executives, board members, insider holdings, and institutional investors
+
+**Process**:
+1. Parse Form 4 filings (max 100) for insider names and holdings
+2. Parse DEF 14A filings (max 10) for executives and board members
+3. Parse SC 13D/G filings (max 50) for institutional investors
+4. Validate and deduplicate names
+5. Calculate active status (filings within 24 months = active)
+6. Extract ownership percentages and share counts
+7. Identify holding companies
+
+**Name Validation**:
+- Minimum length: 5 characters
+- Maximum length: 50 characters
+- Rejects form fields (>30% digits)
+- Rejects IRS/SSN references
+- Rejects boilerplate text patterns
+- 20+ invalid pattern filters
+
+**Output**:
+```python
+{
+    'executives': [
+        {
+            'name': 'John Smith',
+            'title': 'Chief Executive Officer',
+            'shares_owned': '125000',
+            'source': 'Form 4',
+            'filing_date': '2024-11-15',
+            'active': True
+        }
+    ],
+    'board_members': [
+        {
+            'name': 'Jane Doe',
+            'role': 'Independent Director',
+            'independent': True,
+            'source': 'DEF 14A',
+            'filing_date': '2024-04-20',
+            'active': True
+        }
+    ],
+    'insider_holdings': [
+        {
+            'name': 'John Smith',
+            'shares': 125000,
+            'percentage': '1.2%',
+            'source': 'Form 4'
+        }
+    ],
+    'institutional_investors': [
+        {
+            'name': 'Vanguard Group Inc',
+            'shares': 5432100,
+            'percentage': '8.7%',
+            'filing_type': 'SC 13G',
+            'filing_date': '2024-02-14'
+        }
+    ],
+    'holding_companies': [
+        {
+            'name': 'BlackRock Inc',
+            'ownership_percent': '7.3%',
+            'purpose': 'Investment purposes'
+        }
+    ],
+    'total_key_persons': 45,
+    'active_executives': 12,
+    'active_board_members': 11
+}
+```
+
+---
+
+### 6. **Quality Control System** **[NEW]**
+
+#### **Profile Validator** (`profile_validator.py`)
+
+**Purpose**: Validate profiles for completeness and consistency
+
+**Validation Checks**:
+- Required top-level fields (cik, company_info, filing_metadata, generated_at)
+- Company info structure (ticker, name, cik)
+- Filing metadata (date ranges, filing counts)
+- Financial data consistency (time series order, value ranges)
+- Ratio validation (reasonable ranges)
+- Date consistency (chronological order, no future dates)
+
+**Issue Categories**:
+- **INCOMPLETE**: Missing required fields or empty data
+- **INCONSISTENT**: Data type mismatches, invalid values
+- **OUT_OF_ORDER**: Dates not in chronological order
+- **IMPROPER**: Invalid data ranges, nonsensical values
+
+**Quality Scoring**:
+- Data completeness score (0-100)
+- Consistency score (0-100)
+- Overall quality grade (A+, A, B, C, D, F)
+
+**Output**:
+```python
+{
+    'is_valid': False,
+    'status': 'Profile has 5 issues',
+    'issues': [
+        'INCOMPLETE: Missing required field: financial_ratios',
+        'OUT_OF_ORDER: Periods not in chronological order',
+        'INCONSISTENT: ROE value out of reasonable range'
+    ],
+    'categories': {
+        'INCOMPLETE': 1,
+        'OUT_OF_ORDER': 1,
+        'INCONSISTENT': 1
+    },
+    'quality_score': 65.4,
+    'quality_grade': 'C'
+}
+```
+
+---
+
+#### **Failure Tracker** (`failure_tracker.py`)
+
+**Purpose**: Track and manage failed ticker processing
+
+**Failure Reasons**:
+- COMPANY_NOT_FOUND
+- CIK_LOOKUP_FAILED
+- NO_FILINGS
+- FILING_FETCH_ERROR
+- DATA_EXTRACTION_ERROR
+- INSUFFICIENT_DATA
+- AI_ANALYSIS_FAILED
+- PROFILE_SAVE_ERROR
+- TIMEOUT_ERROR
+- UNKNOWN_ERROR
+- CANCELLED
+
+**Tracked Information**:
+- Ticker symbol
+- Failure reason (enum + description)
+- Error message
+- Timestamp
+- Processing context (lookback_years, filing_limit)
+- Retry count
+- Detailed error stack trace
+
+**Features**:
+- Retry tracking (prevents infinite retries)
+- Failure categorization
+- Bulk operations (retry/delete multiple)
+- Export to JSON for analysis
+- Statistics (failure rate by reason)
+
+---
+
+### 7. **AI Analyzer** (`ai_analyzer.py`)
 
 **Purpose**: Generate AI-powered investment insights
 
@@ -550,7 +773,65 @@ def analyze_profile(profile):
 
 ---
 
-### 8. **MongoDB Client** (`mongo_client.py`)
+### 8. **Failed Tickers Dialog** (`failed_tickers_dialog.py`) **[NEW]**
+
+**Purpose**: Manage failed ticker processing attempts
+
+**Features**:
+- **View all failures**: Table showing ticker, reason, timestamp, error message
+- **Categorization**: Group failures by reason (CIK lookup, no filings, timeout, etc.)
+- **Retry functionality**: Select tickers to retry with original or modified settings
+- **Delete functionality**: Remove failed tickers from tracking
+- **Export**: Save failure data to JSON for analysis
+- **Statistics**: View failure rate by category
+
+**UI Components**:
+- Tabs: All Failures | By Category | Statistics
+- Table columns: Ticker, Reason, Error Message, Timestamp, Retry Count, Context
+- Action buttons: Retry Selected, Delete Selected, Retry All, Clear All, Export
+- Details pane: Shows full error stack trace and processing context
+
+**Signals**:
+- `retry_tickers(list)`: Emitted when retrying selected tickers
+- `delete_tickers(list)`: Emitted when deleting selected tickers
+
+---
+
+### 9. **Problematic Profiles Dialog** (`problematic_profiles_dialog.py`) **[NEW]**
+
+**Purpose**: Identify and manage incomplete/inconsistent profiles
+
+**Features**:
+- **Automatic scanning**: Scans all profiles in database using ProfileValidator
+- **Issue categorization**: Groups issues by type (INCOMPLETE, INCONSISTENT, OUT_OF_ORDER, IMPROPER)
+- **Quality scoring**: Shows quality score and grade for each profile
+- **Detailed view**: Expandable details showing all issues per profile
+- **Bulk retry**: Select multiple profiles to regenerate
+- **Filter options**: Show only specific issue types
+- **Export**: Save problematic profile list for auditing
+
+**UI Components**:
+- Tabs: All Problematic | By Issue Type | Quality Distribution
+- Table columns: Ticker, CIK, Company Name, Total Issues, Quality Score, Grade, Last Updated
+- Issue breakdown: Shows count by category (INCOMPLETE: 3, INCONSISTENT: 2, etc.)
+- Action buttons: Scan Profiles, Retry Selected, Retry All, Export Report
+- Progress indicator: Shows scanning progress
+- Details pane: Lists all specific issues for selected profile
+
+**Validation Process**:
+1. Load all profiles from database
+2. For each profile, run ProfileValidator.validate_profile()
+3. Categorize issues using ProfileValidator.categorize_issues()
+4. Calculate quality score
+5. Populate table with results
+6. Allow user to select and retry problematic profiles
+
+**Signals**:
+- `retry_profiles(list)`: Emitted when retrying selected profiles (by CIK)
+
+---
+
+### 10. **MongoDB Client** (`mongo_client.py`)
 
 **Purpose**: Database operations
 
@@ -645,23 +926,49 @@ Start Processing
        │        ├─► Calculate: Governance score
        │        └─► Identify: Compensation red flags
        │
-       ├─► 7. Calculate Metrics
+       ├─► 7. Parse 10-K/10-Q Narratives **[NEW]**
+       │        │
+       │        ├─► Filter: 10-K and 10-Q filings
+       │        ├─► Fetch: HTML/XML content (2 per form type)
+       │        ├─► Extract sections: Business, Risk Factors, MD&A, Market Risk
+       │        ├─► Keyword analysis: Track mentions of risk, litigation, etc.
+       │        ├─► Calculate: Word counts, keyword density
+       │        └─► Aggregate: Risk summary, MD&A summary
+       │
+       ├─► 8. Parse Key Persons **[NEW]**
+       │        │
+       │        ├─► From Form 4: Extract insider names, titles, holdings
+       │        ├─► From DEF 14A: Extract executives, board members
+       │        ├─► From SC 13D/G: Extract institutional investors
+       │        ├─► Validate names: Remove form fields and invalid entries
+       │        ├─► Calculate active status: Check filing recency (24 months)
+       │        └─► Aggregate: Executives, board, holdings, institutions
+       │
+       ├─► 9. Calculate Metrics
        │        │
        │        ├─► Financial Ratios (ROE, ROA, margins, etc.)
        │        ├─► Growth Rates (avg, median, volatility)
        │        ├─► Health Score (profitability, leverage, growth)
        │        └─► Statistical Summary
        │
-       ├─► 8. AI Analysis (Ollama)
+       ├─► 10. AI Analysis (Ollama)
        │        │
        │        ├─► Create comprehensive prompt with ALL data
        │        ├─► Send to LLM (llama3.2, mistral, phi, llama2)
        │        ├─► Parse JSON response
        │        └─► Extract: Thesis, recommendation, signals
        │
-       └─► 9. Store Profile (MongoDB)
+       ├─► 11. Validate Profile **[NEW]**
+       │        │
+       │        ├─► Check required fields
+       │        ├─► Validate data consistency
+       │        ├─► Calculate quality score
+       │        └─► Log any issues
+       │
+       └─► 12. Store Profile (MongoDB)
                 │
-                └─► Save to unified_profiles collection
+                ├─► Save to unified_profiles collection
+                └─► If errors: Track in failure_tracker
 ```
 
 ---
