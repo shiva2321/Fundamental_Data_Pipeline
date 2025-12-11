@@ -66,9 +66,40 @@ class UnifiedSECProfileAggregator:
 
         log('info', f"Starting aggregation for CIK {cik}")
 
-        # Fetch filings from SEC EDGAR API
-        log('info', f"Fetching filings for CIK {cik} from SEC EDGAR API")
-        filings = self.sec_client.get_company_filings(cik)
+        # Check filing cache first
+        filings = None
+        cache_used = False
+        ticker = company_info.get('ticker', '') if company_info else ''
+
+        if lookback_years and ticker:
+            try:
+                from src.utils.filing_cache import get_filing_cache
+                cache = get_filing_cache()
+                filings = cache.get_cached_filings(cik, ticker, lookback_years)
+                if filings:
+                    cache_used = True
+                    log('info', f"✓ Using cached filings for {ticker} ({lookback_years}y): {len(filings)} filings")
+                    if progress_callback:
+                        progress_callback('info', f"📦 Cache: Loaded {len(filings)} filings from cache (fast!)")
+            except Exception as e:
+                logger.warning(f"Cache check failed: {e}")
+
+        # Fetch from SEC if not in cache
+        if not filings:
+            log('info', f"Fetching filings for CIK {cik} from SEC EDGAR API")
+            if progress_callback and ticker:
+                progress_callback('info', f"🌐 Fetching filings from SEC for {ticker}...")
+            filings = self.sec_client.get_company_filings(cik)
+
+            # Cache the fetched filings for future use
+            if filings and lookback_years and ticker:
+                try:
+                    from src.utils.filing_cache import get_filing_cache
+                    cache = get_filing_cache()
+                    cache.cache_filings(cik, ticker, filings, lookback_years)
+                    log('info', f"✓ Cached {len(filings)} filings for {ticker}")
+                except Exception as e:
+                    logger.warning(f"Could not cache filings: {e}")
 
         if not filings:
             log('info', f"No filings found for CIK {cik}")
@@ -421,6 +452,119 @@ class UnifiedSECProfileAggregator:
         else:
             profile["ai_analysis"] = None
             log('info', "Skipping AI/ML analysis (user option)")
+
+        # === SECTION 13: Relationship Extraction ===
+        if opts.get('extract_relationships', True):
+            log('info', "Extracting relationship data")
+            try:
+                from src.extractors.relationship_integrator import RelationshipDataIntegrator
+                from src.clients.company_ticker_fetcher import CompanyTickerFetcher
+
+                # Initialize integrator if not already done
+                if not hasattr(self, 'relationship_integrator'):
+                    ticker_fetcher = CompanyTickerFetcher()
+                    all_companies = ticker_fetcher.get_all_companies()
+                    self.relationship_integrator = RelationshipDataIntegrator(
+                        mongo_wrapper=self.mongo,
+                        ticker_fetcher=ticker_fetcher,
+                        all_companies=all_companies
+                    )
+
+                # Compile data for relationship extraction from ALL filings
+                # Strategy: Use already-parsed data (material events, governance, etc.)
+                # instead of fetching full filing text from SEC
+                filings_text = {}
+                try:
+                    log('info', f"Extracting relationships from ALL {len(filings)} filings using parsed data")
+
+                    # Use material events data (already parsed from 8-Ks)
+                    material_events = profile.get('material_events', {})
+                    if material_events and material_events.get('recent_events'):
+                        events_text = []
+                        for event in material_events['recent_events'][:50]:  # Top 50 events
+                            desc = event.get('description', '')
+                            if desc:
+                                events_text.append(f"{event.get('event_type', 'Event')}: {desc}")
+
+                        if events_text:
+                            filings_text['8-K'] = '\n\n'.join(events_text)
+                            log('info', f"Compiled text from {len(events_text)} material events")
+
+                    # Use governance data (already parsed from DEF 14A)
+                    governance = profile.get('corporate_governance', {})
+                    if governance:
+                        gov_text = []
+
+                        # Executive compensation discussions often mention other companies
+                        exec_comp = governance.get('executive_compensation', {})
+                        if exec_comp:
+                            gov_text.append(str(exec_comp)[:10000])
+
+                        # Board composition
+                        board_comp = governance.get('board_composition', {})
+                        if board_comp:
+                            gov_text.append(str(board_comp)[:5000])
+
+                        if gov_text:
+                            filings_text['DEF14A'] = '\n\n'.join(gov_text)
+                            log('info', f"Compiled text from governance data")
+
+                    # Add AI analysis text (mentions competitors, partners, etc.)
+                    if opts.get('ai_enabled', True) and profile.get('ai_analysis'):
+                        ai_text = []
+                        consensus = profile['ai_analysis'].get('consensus_analysis', {})
+
+                        for field in ['competitive_position', 'investment_thesis', 'risk_factors', 'growth_drivers']:
+                            text = consensus.get(field, '')
+                            if text and text != 'N/A':
+                                ai_text.append(text)
+
+                        if ai_text:
+                            filings_text['AI_ANALYSIS'] = '\n\n'.join(ai_text)
+                            log('info', f"Compiled text from AI analysis")
+
+                    # FALLBACK: If we have very little text, fetch from ALL 10-Ks/10-Qs for comprehensive relationship extraction
+                    total_text_length = sum(len(t) for t in filings_text.values())
+                    if total_text_length < 10000:  # Less than 10KB of text
+                        log('info', f"Limited text available ({total_text_length} chars), fetching from ALL 10-Ks/10-Qs as fallback")
+                        # Process MORE filings for better relationship extraction (up to 20 filings or 2MB of text)
+                        ten_k_text = self._extract_section_text(filings, ['10-K', '10-Q'], max_filings=20, max_chars=2000000)
+                        if ten_k_text:
+                            filings_text['10-K'] = ten_k_text
+                            log('info', f"Fetched {len(ten_k_text)} chars from ALL 10-Ks/10-Qs")
+
+                    log('info', f"Total text for extraction: {sum(len(t) for t in filings_text.values())} chars from {len(filings_text)} sources")
+
+                except Exception as e:
+                    logger.warning(f"Could not compile filing data: {e}")
+
+                # Extract relationships
+                if filings_text:
+                    relationships_data = self.relationship_integrator.extract_relationships_for_profile(
+                        profile=profile,
+                        filings_text=filings_text,
+                        options=opts,
+                        progress_callback=progress_callback
+                    )
+
+                    # Store relationships in profile and MongoDB
+                    self.relationship_integrator.store_relationships_in_profile(
+                        profile=profile,
+                        relationships_data=relationships_data,
+                        mongo_collection=output_collection or 'Fundamental_Data_Pipeline'
+                    )
+
+                    log('info', f"Extracted {len(relationships_data.get('relationships', []))} relationships")
+                else:
+                    log('info', "No filing text available for relationship extraction")
+                    profile["relationships"] = {}
+
+            except Exception as e:
+                logger.exception(f"Could not extract relationships: {e}")
+                profile["relationships"] = {}
+        else:
+            profile["relationships"] = {}
+            log('info', "Skipping relationship extraction (user option)")
 
         # Store the unified profile if output_collection provided
         if output_collection:
@@ -896,4 +1040,69 @@ class UnifiedSECProfileAggregator:
         features["filing_frequency"] = lifecycle.get("filing_frequency", 0)
 
         return features
+
+    def _extract_section_text(
+        self,
+        filings: List[Dict],
+        form_types: List[str],
+        max_chars: int = 500000,
+        max_filings: int = 10
+    ) -> str:
+        """
+        Extract text content from filings of specified types.
+
+        Args:
+            filings: List of filing dictionaries
+            form_types: List of form types to extract (e.g., ['10-K', '10-Q'])
+            max_chars: Maximum characters to extract
+            max_filings: Maximum number of filings to process (default: 10)
+
+        Returns:
+            Combined text from matching filings
+        """
+        text_content = []
+        processed_count = 0
+
+        try:
+            # Filter to matching form types first
+            matching_filings = [f for f in filings if f.get('form') in form_types]
+
+            # Limit to max_filings most recent
+            matching_filings = matching_filings[:max_filings]
+
+            logger.info(f"Extracting text from {len(matching_filings)} {'/'.join(form_types)} filings")
+
+            for idx, filing in enumerate(matching_filings, 1):
+                # Try to get cached text if available
+                if 'text' in filing:
+                    text_content.append(filing['text'])
+                    processed_count += 1
+                elif 'accessionNumber' in filing and filing.get('cik'):
+                    # Try to fetch from SEC (this is slow!)
+                    try:
+                        from src.parsers.filing_content_parser import SECFilingContentFetcher
+                        fetcher = SECFilingContentFetcher()
+
+                        logger.info(f"Fetching filing {idx}/{len(matching_filings)}: {filing['form']} {filing.get('filingDate', 'N/A')}")
+
+                        content = fetcher.fetch_filing_content(
+                            filing['cik'],
+                            filing['accessionNumber']
+                        )
+                        if content:
+                            text_content.append(content)
+                            processed_count += 1
+                            logger.info(f"✓ Fetched {len(content)} chars from {filing['form']}")
+                    except Exception as e:
+                        logger.debug(f"Could not fetch filing text: {e}")
+                        continue
+        except Exception as e:
+            logger.warning(f"Error extracting section text: {e}")
+
+        # Combine and limit to max_chars
+        combined_text = ' '.join(text_content)
+
+        logger.info(f"Extracted {len(combined_text)} total characters from {processed_count} filings")
+
+        return combined_text[:max_chars] if combined_text else ''
 

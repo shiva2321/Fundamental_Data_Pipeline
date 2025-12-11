@@ -7,7 +7,7 @@ collections:
   daily_data: dailydata
   fundamentals: fundamentals
   minute_data: minutebyminute
-  profiles: profiles
+  profiles: Fundamental_Data_Pipeline
   sentiment: sentiment
 email_notifications:
   alert_on_complete: true
@@ -29,7 +29,7 @@ mongodb:
   uri: mongodb://localhost:27017
 profile_settings:
   ai_enabled: true
-  ai_model: llama3.2
+  ai_model: llama2-uncensored
   filing_limit: null
   included_features:
     anomalies: true
@@ -47,17 +47,17 @@ rate_limits:
   polygon: 120
 ui_settings:
   dashboard_splitter_sizes:
-  - 480
-  - 692
+  - 528
+  - 761
   main_splitter_sizes:
   - 1214
   - 143
   splitter_sizes: []
   window_geometry:
-    height: 1361
-    width: 1216
-    x: 170
-    y: 34
+    height: 1089
+    width: 1333
+    x: 258
+    y: 122
 update_frequency:
   fundamentals: DAILY
   institutional: QUARTERLY

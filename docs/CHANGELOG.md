@@ -4,6 +4,78 @@ All notable changes to the Fundamental Data Pipeline project.
 
 ---
 
+## [1.2.0] - 2025-12-07
+
+### 🎯 Major Enhancements - Narrative Analysis, Quality Control & Error Tracking
+
+#### Added
+
+**10-K/10-Q Narrative Parser:**
+- ✅ **Narrative section extraction** - Extracts Business, Risk Factors, MD&A, Market Risk, Financial Statements sections
+- ✅ **Keyword analysis** - Identifies mentions of key terms (risk, litigation, cyber, regulatory, liquidity, etc.)
+- ✅ **Risk factor summarization** - Aggregates and analyzes risk disclosures across filings
+- ✅ **MD&A insights** - Extracts management discussion and analysis for trend analysis
+- ✅ **Section-level metrics** - Word counts, keyword density, and sentiment indicators
+
+**Key Persons Enhanced Parser:**
+- ✅ **Executive extraction** - Identifies CEO, CFO, COO, and other C-suite officers
+- ✅ **Board member analysis** - Extracts board composition and independence status
+- ✅ **Insider holdings tracking** - Comprehensive ownership stake calculations
+- ✅ **Holding company identification** - Identifies major institutional investors
+- ✅ **Active status tracking** - Determines if executives/board members are currently active (based on filing recency)
+- ✅ **Name validation** - Advanced filtering to reject invalid names and form fields
+
+**Profile Quality & Validation System:**
+- ✅ **Profile validator** - Comprehensive validation of profile completeness and consistency
+- ✅ **Issue categorization** - Groups issues into INCOMPLETE, INCONSISTENT, OUT_OF_ORDER, IMPROPER categories
+- ✅ **Quality scoring** - Assigns quality scores based on data availability and consistency
+- ✅ **Automated detection** - Identifies missing fields, date inconsistencies, data gaps
+- ✅ **Problematic profiles dialog** - UI for identifying and retrying incomplete/problematic profiles
+- ✅ **Bulk retry capability** - Select and retry multiple problematic profiles at once
+
+**Failure Tracking System:**
+- ✅ **Detailed failure reasons** - Categorized failure types (CIK lookup, no filings, timeout, etc.)
+- ✅ **Error message capture** - Stores complete error messages and stack traces
+- ✅ **Retry counter** - Tracks how many times a ticker has been retried
+- ✅ **Context preservation** - Saves processing context (lookback_years, filing_limit, etc.)
+- ✅ **Failed tickers dialog** - UI for viewing, retrying, or deleting failed tickers
+- ✅ **Failure categorization** - Groups failures by type for easier diagnosis
+
+**Dual Parser Architecture:**
+- ✅ **Forms/ directory** - Legacy comprehensive form parser system (124 form types)
+- ✅ **src/parsers/ directory** - Modern focused parsers for key filings (10-K/Q, 8-K, Form 4, DEF 14A, SC 13D/G)
+- ✅ **Validation system** - 124 form parsers validated and working (validation_report.json)
+- ✅ **Parser selection** - Automatic fallback between modern and legacy parsers
+
+#### Improved
+
+**Data Extraction:**
+- 🔧 Enhanced content fetching with better error handling
+- 🔧 Improved filing index parsing for multi-document filings
+- 🔧 Better XML/HTML parsing with multiple fallback strategies
+- 🔧 More robust date parsing and normalization
+
+**User Interface:**
+- 🔧 Better error reporting in processing logs
+- 🔧 More detailed progress indicators
+- 🔧 Enhanced profile manager with quality indicators
+- 🔧 Improved visualization of incomplete/problematic profiles
+
+**Error Handling:**
+- 🔧 Graceful degradation when parsers fail
+- 🔧 Better timeout handling for long-running operations
+- 🔧 Checkpoint recovery for interrupted processing
+- 🔧 More informative error messages
+
+#### Technical Improvements
+
+- 📦 Modular parser architecture for easier maintenance
+- 🧪 Comprehensive parser validation suite
+- 🔍 Better logging and debugging capabilities
+- ⚡ Improved performance for large filing sets
+
+---
+
 ## [1.1.0] - 2025-12-04
 
 ### 🎯 Major Improvements - Key Persons Tab & Project Organization

@@ -227,10 +227,11 @@ class InteractiveChartViewer(QDialog):
 class ProfileVisualizationWindow(QDialog):
     """Enhanced visualization window with multiple chart types and AI analysis."""
     
-    def __init__(self, profile: Dict[str, Any], config: Optional[Dict[str, Any]] = None, parent=None):
+    def __init__(self, profile: Dict[str, Any], config: Optional[Dict[str, Any]] = None, parent=None, mongo=None):
         super().__init__(parent)
         self.profile = profile
         self.config = config or {}
+        self.mongo = mongo  # Store mongo wrapper for relationship graph access
         self.setWindowTitle(f"Profile Visualization - {self._get_company_name()}")
         self.resize(1600, 1000)
         
@@ -271,6 +272,11 @@ class ProfileVisualizationWindow(QDialog):
                             or key_persons.get('insider_holdings') or key_persons.get('holding_companies')):
             self.tabs.addTab(self.create_key_persons_tab(), "Key Persons")
         
+        # Add Relationship Graph tab if relationships data exists
+        relationships = self.profile.get('relationships', {})
+        if relationships and relationships.get('relationships'):
+            self.tabs.addTab(self.create_relationship_graph_tab(), "Relationship Graph")
+
         # Add AI Analysis tab if analysis exists
         if self.ai_analysis:
             self.tabs.addTab(self.create_ai_analysis_tab(), "AI/ML Analysis")
@@ -1848,6 +1854,394 @@ class ProfileVisualizationWindow(QDialog):
         
         return tab
     
+    def create_relationship_graph_tab(self) -> QWidget:
+        """Create interactive relationship graph visualization tab."""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+
+        # Add matplotlib canvas
+        try:
+            import matplotlib.pyplot as plt
+            import networkx as nx
+            from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+            from matplotlib.figure import Figure
+
+            relationships_data = self.profile.get('relationships', {})
+            relationships = relationships_data.get('relationships', [])
+
+            if not relationships:
+                no_data = QLabel("No relationship data available for visualization")
+                no_data.setAlignment(Qt.AlignCenter)
+                no_data.setStyleSheet("color: #888; padding: 20px; font-size: 14px;")
+                layout.addWidget(no_data)
+                return tab
+
+            # Info panel
+            info_group = QGroupBox("Graph Information")
+            info_layout = QHBoxLayout(info_group)
+
+            company_info = self.profile.get('company_info', {})
+            ticker = company_info.get('ticker', 'N/A')
+            company_name = company_info.get('name') or company_info.get('title', 'Unknown')
+
+            info_layout.addWidget(QLabel(f"<b>Company:</b> {ticker} - {company_name}"))
+            info_layout.addWidget(QLabel(f"<b>Total Relationships:</b> {len(relationships)}"))
+
+            # Count by type
+            type_counts = {}
+            for rel in relationships:
+                rel_type = rel.get('relationship_type', 'unknown')
+                type_counts[rel_type] = type_counts.get(rel_type, 0) + 1
+
+            types_text = ", ".join([f"{t}: {c}" for t, c in sorted(type_counts.items())])
+            info_layout.addWidget(QLabel(f"<b>By Type:</b> {types_text}"))
+            layout.addWidget(info_group)
+
+            # Create matplotlib figure
+            fig = Figure(figsize=(14, 10), facecolor='#1e1e1e')
+            canvas = FigureCanvas(fig)
+            ax = fig.add_subplot(111, facecolor='#2d2d2d')
+
+            # Build network graph
+            G = nx.DiGraph()
+
+            # Add center node (source company)
+            source_cik = self.profile.get('cik', '')
+            G.add_node(source_cik, label=ticker, node_type='source')
+
+            # Create name mapping for better labels
+            cik_to_name = {source_cik: ticker}
+
+            # Add relationships
+            for rel in relationships:
+                target_cik = rel.get('target_cik', '')
+                target_name = rel.get('target_name', 'Unknown')
+                rel_type = rel.get('relationship_type', 'unknown')
+                confidence = rel.get('confidence_score', 0)
+
+                # Clean up target name (remove "N/A - " prefix if present)
+                if target_name and target_name.startswith('N/A - '):
+                    target_name = target_name.replace('N/A - ', '')
+
+                # Store clean name
+                if target_cik:
+                    cik_to_name[target_cik] = target_name[:20]  # Truncate long names
+                    G.add_node(target_cik, label=target_name, node_type=rel_type)
+                    G.add_edge(source_cik, target_cik,
+                             relationship=rel_type,
+                             confidence=confidence)
+
+            # Layout - circular around center
+            pos = nx.spring_layout(G, k=2, iterations=50, seed=42)
+
+            # Ensure source node is in center
+            if source_cik in pos:
+                all_coords = list(pos.values())
+                center_x = sum(x for x, y in all_coords) / len(all_coords)
+                center_y = sum(y for x, y in all_coords) / len(all_coords)
+                pos[source_cik] = (center_x, center_y)
+
+            # Store for interactivity
+            self.graph_G = G
+            self.graph_pos = pos
+            self.graph_cik_to_name = cik_to_name
+            self.selected_node = None
+            self.drag_offset = None
+            self.is_dragging = False
+            self.last_hover_node = None
+
+            # Draw edges with colors by type
+            edge_colors = {
+                'supplier': '#28a745',
+                'customer': '#007bff',
+                'competitor': '#dc3545',
+                'partner': '#ffc107',
+                'investor': '#17a2b8',
+                'related_company': '#6c757d'
+            }
+
+            for edge in G.edges(data=True):
+                source, target, data = edge
+                rel_type = data.get('relationship', 'unknown')
+                color = edge_colors.get(rel_type, '#6c757d')
+                confidence = data.get('confidence', 0)
+
+                nx.draw_networkx_edges(
+                    G, pos,
+                    edgelist=[(source, target)],
+                    edge_color=color,
+                    alpha=min(0.3 + confidence * 0.7, 1.0),
+                    width=1 + confidence * 2,
+                    arrows=True,
+                    arrowsize=10,
+                    ax=ax
+                )
+
+            # Draw nodes
+            # Source node (larger, special color)
+            nx.draw_networkx_nodes(
+                G, pos,
+                nodelist=[source_cik],
+                node_color='#4da6ff',
+                node_size=3000,
+                alpha=0.9,
+                ax=ax
+            )
+
+            # Target nodes (uniform color for clarity)
+            target_nodes = [n for n in G.nodes() if n != source_cik]
+            if target_nodes:
+                nx.draw_networkx_nodes(
+                    G, pos,
+                    nodelist=target_nodes,
+                    node_color='#7fb3d5',
+                    node_size=1000,
+                    alpha=0.7,
+                    ax=ax
+                )
+
+            # Draw labels using clean company names
+            labels = {node: cik_to_name.get(node, 'Unknown') for node in G.nodes()}
+
+            # Source label (larger)
+            nx.draw_networkx_labels(
+                G, pos,
+                labels={source_cik: labels[source_cik]},
+                font_size=12,
+                font_weight='bold',
+                font_color='white',
+                ax=ax
+            )
+
+            # Target labels (smaller, showing actual company names)
+            target_labels = {k: v for k, v in labels.items() if k != source_cik}
+            nx.draw_networkx_labels(
+                G, pos,
+                labels=target_labels,
+                font_size=8,
+                font_weight='bold',
+                font_color='white',
+                ax=ax
+            )
+
+            # Title and styling
+            ax.set_title(f'Relationship Network for {ticker}',
+                        fontsize=16, fontweight='bold', color='white', pad=20)
+            ax.axis('off')
+
+            # Add legend
+            from matplotlib.patches import Patch
+            legend_elements = [
+                Patch(facecolor=color, label=rel_type.title())
+                for rel_type, color in edge_colors.items()
+                if rel_type in type_counts
+            ]
+            ax.legend(handles=legend_elements, loc='upper right',
+                     facecolor='#2d2d2d', edgecolor='white',
+                     labelcolor='white', fontsize=10)
+
+            # === ADD INTERACTIVITY ===
+
+            # Create annotation for hover tooltips
+            annot = ax.annotate("", xy=(0,0), xytext=(15,15),
+                               textcoords="offset points",
+                               bbox=dict(boxstyle="round,pad=0.8", fc="#1e1e1e", ec="#4da6ff", lw=2, alpha=0.95),
+                               color='white',
+                               fontsize=10,
+                               fontweight='bold',
+                               visible=False,
+                               zorder=1000)
+
+            # Mouse event handlers
+            def on_hover(event):
+                """Show tooltip when hovering over nodes"""
+                if self.is_dragging:
+                    return
+
+                if event.inaxes == ax and event.xdata and event.ydata:
+                    # Find closest node
+                    min_dist = float('inf')
+                    closest_node = None
+
+                    for node_cik, (x, y) in pos.items():
+                        dist = ((x - event.xdata)**2 + (y - event.ydata)**2)**0.5
+                        size = 3000 if node_cik == source_cik else 1000
+                        radius = (size / 1000) ** 0.5 * 0.05
+
+                        if dist < radius and dist < min_dist:
+                            min_dist = dist
+                            closest_node = node_cik
+
+                    if closest_node and closest_node != self.last_hover_node:
+                        self.last_hover_node = closest_node
+                        node_name = cik_to_name.get(closest_node, 'Unknown')
+                        node_type = "Source Company" if closest_node == source_cik else "Target Company"
+                        degree = G.degree(closest_node)
+
+                        annot.xy = pos[closest_node]
+                        text = f"{node_name}\n{node_type}\n{degree} connections"
+                        annot.set_text(text)
+                        annot.set_visible(True)
+                        canvas.draw_idle()
+                    elif not closest_node and self.last_hover_node:
+                        self.last_hover_node = None
+                        annot.set_visible(False)
+                        canvas.draw_idle()
+
+            def on_click(event):
+                """Handle click events - show details"""
+                if self.is_dragging:
+                    return
+
+                if event.inaxes == ax and event.xdata and event.ydata:
+                    # Find clicked node
+                    for node_cik, (x, y) in pos.items():
+                        dist = ((x - event.xdata)**2 + (y - event.ydata)**2)**0.5
+                        size = 3000 if node_cik == source_cik else 1000
+                        radius = (size / 1000) ** 0.5 * 0.05
+
+                        if dist < radius:
+                            node_name = cik_to_name.get(node_cik, 'Unknown')
+                            # Count relationships
+                            rels = [r for r in relationships if r.get('target_cik') == node_cik or source_cik == node_cik]
+
+                            from PySide6.QtWidgets import QMessageBox
+                            msg = QMessageBox()
+                            msg.setWindowTitle(f"Node Details - {node_name}")
+                            msg.setText(f"<h2>{node_name}</h2><p>CIK: {node_cik}<br>Connections: {G.degree(node_cik)}</p>")
+                            msg.setStyleSheet("background-color: #1e1e1e; color: white;")
+                            msg.exec()
+                            return
+
+            def on_press(event):
+                """Start dragging with right-click"""
+                if event.button != 3:  # Not right-click
+                    return
+
+                if event.inaxes == ax and event.xdata and event.ydata:
+                    for node_cik, (x, y) in pos.items():
+                        dist = ((x - event.xdata)**2 + (y - event.ydata)**2)**0.5
+                        size = 3000 if node_cik == source_cik else 1000
+                        radius = (size / 1000) ** 0.5 * 0.05
+
+                        if dist < radius:
+                            self.selected_node = node_cik
+                            x0, y0 = pos[node_cik]
+                            self.drag_offset = (x0 - event.xdata, y0 - event.ydata)
+                            self.is_dragging = False
+                            break
+
+            def on_motion(event):
+                """Drag node if selected"""
+                if self.selected_node and event.inaxes == ax and event.xdata and event.ydata:
+                    self.is_dragging = True
+                    if annot.get_visible():
+                        annot.set_visible(False)
+
+                    # Update position
+                    x = event.xdata + self.drag_offset[0]
+                    y = event.ydata + self.drag_offset[1]
+                    pos[self.selected_node] = (x, y)
+
+                    # Redraw
+                    ax.clear()
+                    ax.set_facecolor('#2d2d2d')
+                    ax.axis('off')
+
+                    # Redraw edges
+                    for edge in G.edges(data=True):
+                        source, target, data = edge
+                        rel_type = data.get('relationship', 'unknown')
+                        color = edge_colors.get(rel_type, '#6c757d')
+                        confidence = data.get('confidence', 0)
+
+                        nx.draw_networkx_edges(
+                            G, pos,
+                            edgelist=[(source, target)],
+                            edge_color=color,
+                            alpha=min(0.3 + confidence * 0.7, 1.0),
+                            width=1 + confidence * 2,
+                            arrows=True,
+                            arrowsize=10,
+                            ax=ax
+                        )
+
+                    # Redraw nodes
+                    nx.draw_networkx_nodes(G, pos, nodelist=[source_cik],
+                                          node_color='#4da6ff', node_size=3000, alpha=0.9, ax=ax)
+                    if target_nodes:
+                        nx.draw_networkx_nodes(G, pos, nodelist=target_nodes,
+                                              node_color='#7fb3d5', node_size=1000, alpha=0.7, ax=ax)
+
+                    # Redraw labels
+                    nx.draw_networkx_labels(G, pos, labels={source_cik: labels[source_cik]},
+                                           font_size=12, font_weight='bold', font_color='white', ax=ax)
+                    nx.draw_networkx_labels(G, pos, labels=target_labels,
+                                           font_size=8, font_weight='bold', font_color='white', ax=ax)
+
+                    ax.set_title(f'Relationship Network for {ticker}',
+                               fontsize=16, fontweight='bold', color='white', pad=20)
+                    canvas.draw_idle()
+
+            def on_release(event):
+                """Stop dragging"""
+                self.selected_node = None
+                self.drag_offset = None
+                if self.is_dragging:
+                    self.is_dragging = False
+
+            # Connect events
+            canvas.mpl_connect('motion_notify_event', on_hover)
+            canvas.mpl_connect('button_press_event', on_click)
+            canvas.mpl_connect('button_press_event', on_press)
+            canvas.mpl_connect('motion_notify_event', on_motion)
+            canvas.mpl_connect('button_release_event', on_release)
+
+            fig.tight_layout()
+            layout.addWidget(canvas)
+
+            # Add statistics table below graph
+            stats_group = QGroupBox("Relationship Statistics")
+            stats_layout = QVBoxLayout(stats_group)
+
+            stats_table = QTableWidget()
+            stats_table.setColumnCount(3)
+            stats_table.setHorizontalHeaderLabels(["Relationship Type", "Count", "Avg Confidence"])
+            stats_table.setRowCount(len(type_counts))
+
+            for i, (rel_type, count) in enumerate(sorted(type_counts.items(), key=lambda x: x[1], reverse=True)):
+                # Calculate average confidence for this type
+                type_rels = [r for r in relationships if r.get('relationship_type') == rel_type]
+                avg_conf = sum(r.get('confidence_score', 0) for r in type_rels) / len(type_rels) if type_rels else 0
+
+                stats_table.setItem(i, 0, QTableWidgetItem(rel_type.title()))
+                stats_table.setItem(i, 1, QTableWidgetItem(str(count)))
+
+                conf_item = QTableWidgetItem(f"{avg_conf:.2f}")
+                # Color code confidence
+                if avg_conf >= 0.8:
+                    conf_item.setForeground(QColor("#28a745"))
+                elif avg_conf >= 0.6:
+                    conf_item.setForeground(QColor("#ffc107"))
+                else:
+                    conf_item.setForeground(QColor("#dc3545"))
+                stats_table.setItem(i, 2, conf_item)
+
+            stats_table.resizeColumnsToContents()
+            stats_table.setMaximumHeight(200)
+            stats_layout.addWidget(stats_table)
+            layout.addWidget(stats_group)
+
+        except Exception as e:
+            error_label = QLabel(f"Error creating relationship graph: {str(e)}")
+            error_label.setStyleSheet("color: #dc3545; padding: 20px;")
+            error_label.setWordWrap(True)
+            layout.addWidget(error_label)
+            import traceback
+            print(f"Graph error: {traceback.format_exc()}")
+
+        return tab
+
     def create_ai_analysis_tab(self) -> QWidget:
         """Create AI/ML analysis tab with multi-model comparison support."""
         tab = QWidget()
