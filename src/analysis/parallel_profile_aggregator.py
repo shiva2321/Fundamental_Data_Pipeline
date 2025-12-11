@@ -355,11 +355,7 @@ class ParallelProfileAggregator:
         """Extract financial time series data"""
         try:
             # Import here to avoid circular dependency
-            import sys
-            import os
-            sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
-
-            from src.analysis.unified_profile_aggregator import UnifiedSECProfileAggregator
+            from .unified_profile_aggregator import UnifiedSECProfileAggregator
             temp_aggregator = UnifiedSECProfileAggregator(self.mongo, self.sec_client)
             return temp_aggregator._extract_financial_time_series(filings, cik)  # FIXED: correct method name
         except Exception as e:
@@ -550,11 +546,7 @@ class ParallelProfileAggregator:
         """Calculate derived financial metrics after all data is collected"""
         try:
             # Import here to avoid circular dependency
-            import sys
-            import os
-            sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
-
-            from src.analysis.unified_profile_aggregator import UnifiedSECProfileAggregator
+            from .unified_profile_aggregator import UnifiedSECProfileAggregator
 
             temp_aggregator = UnifiedSECProfileAggregator(self.mongo, self.sec_client)
 

@@ -527,8 +527,8 @@ class UnifiedSECProfileAggregator:
                     total_text_length = sum(len(t) for t in filings_text.values())
                     if total_text_length < 10000:  # Less than 10KB of text
                         log('info', f"Limited text available ({total_text_length} chars), fetching from ALL 10-Ks/10-Qs as fallback")
-                        # Process MORE filings for better relationship extraction (up to 20 filings or 2MB of text)
-                        ten_k_text = self._extract_section_text(filings, ['10-K', '10-Q'], max_filings=20, max_chars=2000000)
+                        # Process MORE filings for better relationship extraction (up to 20 filings or 1MB of text)
+                        ten_k_text = self._extract_section_text(filings, ['10-K', '10-Q'], max_filings=20, max_chars=1000000)  # Reduced from 2MB to 1MB for memory efficiency
                         if ten_k_text:
                             filings_text['10-K'] = ten_k_text
                             log('info', f"Fetched {len(ten_k_text)} chars from ALL 10-Ks/10-Qs")

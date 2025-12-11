@@ -6,6 +6,7 @@ against known company database.
 """
 import logging
 import re
+import time
 from typing import List, Tuple, Dict, Set, Optional
 from functools import lru_cache
 from fuzzywuzzy import fuzz, process
@@ -158,7 +159,7 @@ class CompanyMentionExtractor:
             List of fuzzy match results
         """
         matches = []
-        start_time = __import__('time').time()
+        start_time = time.time()
 
         # OPTIMIZATION 1: Extract unique capitalized phrases (dedup before fuzzy matching)
         company_pattern = r'\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,3})\b'
@@ -204,7 +205,7 @@ class CompanyMentionExtractor:
         # Process each unique phrase - limited set now
         for idx, potential_name in enumerate(potential_names, 1):
             # Skip if fuzzy matching would take too long (prevent timeout)
-            elapsed = __import__('time').time() - start_time
+            elapsed = time.time() - start_time
             if elapsed > 10:  # 10 second timeout for entire fuzzy matching
                 logger.warning(f"Fuzzy matching timeout after {elapsed:.1f}s - stopping early")
                 break
@@ -229,7 +230,7 @@ class CompanyMentionExtractor:
                 confidence = score / 100.0
                 matches.append((cik, best_match.title(), confidence))
 
-        elapsed = __import__('time').time() - start_time
+        elapsed = time.time() - start_time
         logger.info(f"Fuzzy matching complete in {elapsed:.2f}s: Found {len(matches)} matches from {len(potential_names)} phrases")
         return matches
 
