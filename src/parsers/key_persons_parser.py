@@ -7,7 +7,11 @@ import logging
 import re
 from typing import Dict, List, Any, Optional
 from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError
+import threading
+import signal
 
+logger = logging.getLogger(__name__)
 logger = logging.getLogger(__name__)
 
 
@@ -41,7 +45,7 @@ class KeyPersonsParser:
             logger.warning(f"Could not initialize content parsers: {e}")
             self.parsers_available = False
 
-    def parse_key_persons(self, filings: List[Dict[str, Any]], cik: str, 
+    def parse_key_persons(self, filings: List[Dict[str, Any]], cik: str,
                           max_form4: int = 100, max_def14a: int = 10,
                           max_sc13: int = 50) -> Dict[str, Any]:
         """
@@ -50,9 +54,9 @@ class KeyPersonsParser:
         Args:
             filings: List of all filings
             cik: Company CIK
-            max_form4: Maximum Form 4 filings to parse for insider data (increased to 100)
-            max_def14a: Maximum DEF 14A filings to parse for executive/board data (increased to 10)
-            max_sc13: Maximum SC 13D/G filings to parse for institutional data (increased to 50)
+            max_form4: Maximum Form 4 filings to parse for insider data (default 100 for full coverage)
+            max_def14a: Maximum DEF 14A filings to parse for board composition (default 10)
+            max_sc13: Maximum SC 13D/G filings to parse for institutional data (default 50 for full coverage)
 
         Returns:
             Dictionary with key persons data including:
@@ -61,11 +65,11 @@ class KeyPersonsParser:
             - insider_holdings: Detailed insider ownership data
             - holding_companies: Major institutional shareholders
         """
+        import time
+        start_time = time.time()
+        total_timeout = 240  # 4-minute hard limit for entire extraction
+
         result = {
-            'executives': [],
-            'board_members': [],
-            'insider_holdings': [],
-            'holding_companies': [],
             'summary': {},
             'generated_at': datetime.utcnow().isoformat()
         }
@@ -74,35 +78,71 @@ class KeyPersonsParser:
             result['error'] = 'Content parsers not available'
             return result
 
-        # Extract insider holdings from Form 4 FIRST (most reliable source of names)
-        try:
-            insider_data = self._extract_insider_holdings(filings, cik, max_form4)
-            result['insider_holdings'] = insider_data.get('holdings', [])
-        except Exception as e:
-            logger.warning(f"Error extracting insider holdings: {e}")
-            result['insider_holdings'] = []
+        # === PARALLEL EXTRACTION: Process all three filing types concurrently ===
+        # Instead of sequential processing (Form 4 → Board → Institutional),
+        # run all three in parallel threads to maintain full data coverage while improving speed
+
+        logger.info("Starting parallel key persons extraction (Form 4, DEF 14A, SC 13D/G)")
+        logger.info(f"  Parsing {max_form4} Form 4 filings for insider holdings")
+        logger.info(f"  Parsing {max_def14a} DEF 14A filings for board composition")
+        logger.info(f"  Parsing {max_sc13} SC 13D/G filings for holding companies")
+
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            # Submit all three extraction tasks in parallel
+            futures = {
+                executor.submit(self._extract_insider_holdings, filings, cik, max_form4): 'insider_holdings',
+                executor.submit(self._extract_board_from_def14a, filings, cik, max_def14a): 'board_members',
+                executor.submit(self._extract_holding_companies, filings, cik, max_sc13): 'holding_companies'
+            }
+
+            # Collect results as they complete
+            for future in as_completed(futures, timeout=180):
+                task_name = futures[future]
+
+                # Check timeout
+                elapsed = time.time() - start_time
+                if elapsed > total_timeout:
+                    logger.warning(f"Key persons extraction exceeded {total_timeout}s - aborting remaining tasks")
+                    break
+
+                try:
+                    task_result = future.result(timeout=60)  # 1 minute per task
+
+                    if task_name == 'insider_holdings':
+                        result['insider_holdings'] = task_result.get('holdings', [])
+                        logger.info(f"✓ Extracted {len(result['insider_holdings'])} insider holdings")
+                    elif task_name == 'board_members':
+                        result['board_members'] = task_result.get('board_members', [])
+                        logger.info(f"✓ Extracted {len(result['board_members'])} board members")
+                    elif task_name == 'holding_companies':
+                        result['holding_companies'] = task_result.get('holders', [])
+                        logger.info(f"✓ Extracted {len(result['holding_companies'])} institutional holders")
+
+                except TimeoutError:
+                    logger.error(f"{task_name} extraction timed out")
+                    if task_name == 'insider_holdings':
+                        result['insider_holdings'] = []
+                    elif task_name == 'board_members':
+                        result['board_members'] = []
+                    elif task_name == 'holding_companies':
+                        result['holding_companies'] = []
+                except Exception as e:
+                    logger.error(f"Error in {task_name} extraction: {e}")
+                    if task_name == 'insider_holdings':
+                        result['insider_holdings'] = []
+                    elif task_name == 'board_members':
+                        result['board_members'] = []
+                    elif task_name == 'holding_companies':
+                        result['holding_companies'] = []
 
         # Extract executives from insider data (Form 4 has clean names and titles)
         result['executives'] = self._extract_executives_from_insiders(result['insider_holdings'])
-
-        # Extract holding companies from SC 13D/G
-        try:
-            holding_data = self._extract_holding_companies(filings, cik, max_sc13)
-            result['holding_companies'] = holding_data.get('holders', [])
-        except Exception as e:
-            logger.warning(f"Error extracting holding companies: {e}")
-            result['holding_companies'] = []
-
-        # Extract board data from DEF 14A using content parser
-        try:
-            board_data = self._extract_board_from_def14a(filings, cik, max_def14a)
-            result['board_members'] = board_data.get('board_members', [])
-        except Exception as e:
-            logger.warning(f"Error extracting board: {e}")
-            result['board_members'] = []
+        logger.info(f"✓ Extracted {len(result['executives'])} key executives")
 
         # Generate summary
         result['summary'] = self._generate_summary(result)
+
+        logger.info("✅ Key persons extraction complete")
 
         return result
 
@@ -249,35 +289,35 @@ class KeyPersonsParser:
                 continue
 
             # Parse the Form 4
-            parsed = self.form4_parser.parse_form4_transactions(cik, accession)
-            
-            if not parsed.get('available'):
-                continue
+            try:
+                parsed = self.form4_parser.parse_form4_transactions(cik, accession)
 
-            insider_name = parsed.get('insider_name', 'Unknown')
-            insider_title = parsed.get('insider_title', 'Unknown')
+                if not parsed.get('available'):
+                    continue
 
-            # Get shares owned after transactions
-            transactions = parsed.get('transactions', [])
-            shares_owned = 0
-            if transactions:
-                # Get the most recent shares owned after transaction
-                for trans in transactions:
-                    shares_after = trans.get('shares_owned_after', 0)
-                    if shares_after > 0:
-                        shares_owned = shares_after
-                        break
+                insider_name = parsed.get('insider_name', 'Unknown')
 
-            # Update or create insider record (keep most recent data)
-            if insider_name != 'Unknown':
+                # Skip invalid names
+                if insider_name == 'Unknown' or len(insider_name) < 3:
+                    continue
+
+                # Get shares owned after transactions
+                transactions = parsed.get('transactions', [])
+                shares_owned = 0
+                if transactions:
+                    # Get shares owned from most recent transaction
+                    last_trans = transactions[-1]
+                    shares_owned = last_trans.get('shares_owned_after', 0)
+
+                # Create unique key for this insider
                 name_key = insider_name.lower().strip()
+
                 if name_key not in insider_holdings:
-                    # Calculate net transaction value
+                    # New insider
                     net_trans = parsed.get('net_transaction', {})
-                    
                     insider_holdings[name_key] = {
                         'name': insider_name,
-                        'title': insider_title,
+                        'title': parsed.get('insider_title', 'Insider'),  # ✅ Fixed field name
                         'shares_owned': shares_owned,
                         'latest_filing_date': filing_date,
                         'net_buy_value': net_trans.get('buy_value', 0),
@@ -298,6 +338,10 @@ class KeyPersonsParser:
                     if shares_owned > 0 and filing_date > existing.get('latest_filing_date', ''):
                         existing['shares_owned'] = shares_owned
                         existing['latest_filing_date'] = filing_date
+
+            except Exception as e:
+                logger.debug(f"Error parsing Form 4 {accession}: {e}")
+                continue
 
         # Convert to list and sort by shares owned
         holdings_list = list(insider_holdings.values())

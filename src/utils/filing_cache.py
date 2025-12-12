@@ -474,19 +474,10 @@ class FilingCache:
             content_file = content_dir / f"{content_key}.txt"
 
             if content_file.exists():
-                try:
-                    # Try reading with strict UTF-8 first
-                    with open(content_file, 'r', encoding='utf-8', errors='strict') as f:
-                        content = f.read()
-                        logger.debug(f"✓ Content cache HIT for {accession_number} ({len(content)} bytes)")
-                        return content
-                except UnicodeDecodeError:
-                    # Fall back to replacing invalid sequences with replacement character
-                    logger.warning(f"Invalid UTF-8 in cached file {content_file}, using replacement strategy")
-                    with open(content_file, 'r', encoding='utf-8', errors='replace') as f:
-                        content = f.read()
-                        logger.debug(f"✓ Content cache HIT for {accession_number} ({len(content)} bytes)")
-                        return content
+                with open(content_file, 'r', encoding='utf-8', errors='ignore') as f:
+                    content = f.read()
+                    logger.debug(f"✓ Content cache HIT for {accession_number} ({len(content)} bytes)")
+                    return content
 
         except Exception as e:
             logger.debug(f"Error reading content cache: {e}")

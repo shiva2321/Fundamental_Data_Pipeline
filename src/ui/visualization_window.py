@@ -2,21 +2,47 @@
 Enhanced Profile Visualization Window with comprehensive insights.
 Uses multiple chart types appropriate for different data representations.
 """
+import logging
 from typing import Dict, Any, Optional
 
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QTabWidget,
                                QWidget, QLabel, QScrollArea, QGroupBox, QPushButton,
                                QGridLayout, QTableWidget, QTableWidgetItem,
-                               QHeaderView, QHBoxLayout)
-from PySide6.QtCore import Qt
+                               QHeaderView, QHBoxLayout, QSizePolicy, QSplitter, QProgressBar, QMessageBox)
+from PySide6.QtCore import Qt, QObject, QEvent, QSettings, QByteArray
 from PySide6.QtGui import QFont, QColor
 
+from types import MethodType
+
 import matplotlib
-matplotlib.use('Qt5Agg')
-from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas, NavigationToolbar2QT as NavigationToolbar
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvasQTAggBase, NavigationToolbar2QT as NavigationToolbar
 from matplotlib.figure import Figure
 import matplotlib.pyplot as plt
 import numpy as np
+
+logger = logging.getLogger(__name__)
+
+
+class SafeFigureCanvas(FigureCanvasQTAggBase):
+    """Canvas that ignores cursor changes after the widget is deleted."""
+
+    def setCursor(self, cursor):
+        try:
+            return super().setCursor(cursor)
+        except RuntimeError:
+            # Canvas might already be destroyed when Matplotlib tries to change the cursor
+            return
+
+
+class SafeNavigationToolbar(NavigationToolbar):
+    """Navigation toolbar that tolerates deleted status labels."""
+
+    def set_message(self, s):
+        try:
+            super().set_message(s)
+        except RuntimeError:
+            # QLabel may already be destroyed when the dialog closes; ignore the message update.
+            pass
 
 
 class InteractiveChartViewer(QDialog):
@@ -33,11 +59,11 @@ class InteractiveChartViewer(QDialog):
         self.fig = fig
 
         # Create canvas from existing figure
-        self.canvas = FigureCanvas(fig)
+        self.canvas = SafeFigureCanvas(fig)
         self.canvas.setParent(self)
 
         # Add navigation toolbar for zoom, pan, save functionality
-        self.toolbar = NavigationToolbar(self.canvas, self)
+        self.toolbar = SafeNavigationToolbar(self.canvas, self)
 
         layout.addWidget(self.toolbar)
         layout.addWidget(self.canvas)
@@ -229,17 +255,37 @@ class ProfileVisualizationWindow(QDialog):
     
     def __init__(self, profile: Dict[str, Any], config: Optional[Dict[str, Any]] = None, parent=None, mongo=None):
         super().__init__(parent)
+
+        # Validate profile has required data
+        if not profile or not isinstance(profile, dict):
+            raise ValueError("Profile must be a non-empty dictionary")
+
         self.profile = profile
         self.config = config or {}
         self.mongo = mongo  # Store mongo wrapper for relationship graph access
-        self.setWindowTitle(f"Profile Visualization - {self._get_company_name()}")
+
+        try:
+            self.setWindowTitle(f"Profile Visualization - {self._get_company_name()}")
+        except Exception as e:
+            logger.error(f"Error setting window title: {e}")
+            self.setWindowTitle("Profile Visualization")
+
         self.resize(1600, 1000)
         
         # AI analysis is already in the profile (generated during profile creation)
         self.ai_analysis = profile.get('ai_analysis')
 
-        self.setup_ui()
-        
+        try:
+            self.setup_ui()
+        except Exception as e:
+            logger.error(f"Error setting up UI: {e}")
+            # Create minimal fallback UI
+            layout = QVBoxLayout(self)
+            error_label = QLabel(f"Error initializing visualization: {str(e)}")
+            error_label.setStyleSheet("color: #ff4444; padding: 20px;")
+            layout.addWidget(error_label)
+            raise
+
     def _get_company_name(self) -> str:
         """Get company name from profile."""
         info = self.profile.get('company_info', {})
@@ -248,47 +294,158 @@ class ProfileVisualizationWindow(QDialog):
         return f"{ticker} - {name}"
     
     def setup_ui(self):
-        """Setup the UI layout."""
-        layout = QVBoxLayout(self)
-        
-        # Header
-        header = QLabel(self._get_company_name())
-        header.setFont(QFont("Segoe UI", 16, QFont.Bold))
-        header.setStyleSheet("color: #4da6ff; padding: 10px;")
-        layout.addWidget(header)
-        
-        # Tabs
-        self.tabs = QTabWidget()
-        self.tabs.addTab(self.create_overview_tab(), "Overview")
-        self.tabs.addTab(self.create_decision_summary_tab(), "Decision Summary")
-        self.tabs.addTab(self.create_financials_tab(), "Financial Trends")
-        self.tabs.addTab(self.create_ratios_tab(), "Financial Ratios")
-        self.tabs.addTab(self.create_growth_tab(), "Growth Analysis")
-        self.tabs.addTab(self.create_health_tab(), "Health Indicators")
-        
-        # Add Key Persons tab if data exists
-        key_persons = self.profile.get('key_persons', {})
-        if key_persons and (key_persons.get('executives') or key_persons.get('board_members') 
-                            or key_persons.get('insider_holdings') or key_persons.get('holding_companies')):
-            self.tabs.addTab(self.create_key_persons_tab(), "Key Persons")
-        
-        # Add Relationship Graph tab if relationships data exists
-        relationships = self.profile.get('relationships', {})
-        if relationships and relationships.get('relationships'):
-            self.tabs.addTab(self.create_relationship_graph_tab(), "Relationship Graph")
+        """Setup the UI layout with lazy-loaded tabs."""
+        try:
+            layout = QVBoxLayout(self)
 
-        # Add AI Analysis tab if analysis exists
-        if self.ai_analysis:
-            self.tabs.addTab(self.create_ai_analysis_tab(), "AI/ML Analysis")
-        
-        layout.addWidget(self.tabs)
-        
-        # Close button
-        close_btn = QPushButton("Close")
-        close_btn.clicked.connect(self.close)
-        close_btn.setMaximumWidth(100)
-        layout.addWidget(close_btn, alignment=Qt.AlignRight)
-    
+            # Header
+            header = QLabel(self._get_company_name())
+            header.setFont(QFont("Segoe UI", 16, QFont.Bold))
+            header.setStyleSheet("color: #4da6ff; padding: 10px;")
+            layout.addWidget(header)
+
+            # Tabs with lazy loading
+            self.tabs = QTabWidget()
+            self.tab_cache = {}  # Cache loaded tabs
+
+            # Add tabs with placeholder widgets - will be rendered on first view
+            self.tabs.addTab(QWidget(), "Overview")
+            self.tabs.addTab(QWidget(), "Decision Summary")
+            self.tabs.addTab(QWidget(), "Financial Trends")
+            self.tabs.addTab(QWidget(), "Financial Ratios")
+            self.tabs.addTab(QWidget(), "Growth Analysis")
+            self.tabs.addTab(QWidget(), "Health Indicators")
+
+            # Map tab indices to creator functions
+            self.tab_creators = {
+                0: ('Overview', self.create_overview_tab),
+                1: ('Decision Summary', self.create_decision_summary_tab),
+                2: ('Financial Trends', self.create_financials_tab),
+                3: ('Financial Ratios', self.create_ratios_tab),
+                4: ('Growth Analysis', self.create_growth_tab),
+                5: ('Health Indicators', self.create_health_tab),
+            }
+
+            next_index = 6
+
+            # Add Key Persons tab if data exists
+            key_persons = self.profile.get('key_persons', {})
+            if key_persons and (key_persons.get('executives') or key_persons.get('board_members')
+                                or key_persons.get('insider_holdings') or key_persons.get('holding_companies')):
+                self.tabs.addTab(QWidget(), "Key Persons")
+                self.tab_creators[next_index] = ('Key Persons', self.create_key_persons_tab)
+                next_index += 1
+
+            # Add Relationship Graph tab if relationships data exists
+            relationships = self.profile.get('relationships', {})
+            if relationships and relationships.get('relationships'):
+                self.tabs.addTab(QWidget(), "Relationship Graph")
+                self.tab_creators[next_index] = ('Relationship Graph', self.create_relationship_graph_tab)
+                next_index += 1
+
+            # Add AI Analysis tab if analysis exists
+            if self.ai_analysis:
+                self.tabs.addTab(QWidget(), "AI/ML Analysis")
+                self.tab_creators[next_index] = ('AI/ML Analysis', self.create_ai_analysis_tab)
+                next_index += 1
+
+            # Add Filing Viewer tab (always available)
+            self.tabs.addTab(QWidget(), "SEC Filings")
+            self.tab_creators[next_index] = ('SEC Filings', self.create_filing_viewer_tab)
+            next_index += 1
+
+            # Connect tab change signal for lazy loading
+            self.tabs.currentChanged.connect(self._load_tab_on_view)
+
+            layout.addWidget(self.tabs)
+
+            # Close button
+            close_btn = QPushButton("Close")
+            close_btn.clicked.connect(self.close)
+            close_btn.setMaximumWidth(100)
+            layout.addWidget(close_btn, alignment=Qt.AlignRight)
+
+            logger.info(f"Visualization window initialized with {len(self.tab_creators)} tabs")
+
+        except Exception as e:
+            logger.exception(f"Critical error in setup_ui: {e}")
+            # Create minimal fallback layout
+            layout = QVBoxLayout(self)
+            error_label = QLabel(f"Fatal Error: {str(e)}")
+            error_label.setStyleSheet("color: #ff0000; padding: 20px;")
+            layout.addWidget(error_label)
+            raise
+
+    def _load_tab_on_view(self, index: int):
+        """Load tab content when first viewed (lazy loading)."""
+        try:
+            if index not in self.tab_creators:
+                logger.debug(f"Tab index {index} not in creators")
+                return
+
+            # Skip if already cached
+            if index in self.tab_cache:
+                return
+
+            tab_name, creator_func = self.tab_creators[index]
+
+            logger.info(f"Loading tab: {tab_name} (index {index})")
+
+            try:
+                # Create the actual tab widget
+                tab_widget = creator_func()
+
+                if tab_widget is None:
+                    raise ValueError(f"Creator function returned None for {tab_name}")
+
+                # Disconnect signal to prevent recursive calls when we modify tabs
+                self.tabs.currentChanged.disconnect(self._load_tab_on_view)
+
+                try:
+                    # Replace placeholder with actual content
+                    self.tabs.setTabText(index, tab_name)  # Ensure tab name is set
+                    self.tabs.removeTab(index)
+                    self.tabs.insertTab(index, tab_widget, tab_name)
+                    self.tabs.setCurrentIndex(index)
+
+                    # Cache it
+                    self.tab_cache[index] = tab_widget
+                    logger.info(f"✓ Tab loaded: {tab_name}")
+                finally:
+                    # Always reconnect signal
+                    self.tabs.currentChanged.connect(self._load_tab_on_view)
+
+            except Exception as e:
+                logger.exception(f"Error creating {tab_name}: {e}")
+                # Create error widget with details
+                error_widget = QWidget()
+                error_layout = QVBoxLayout(error_widget)
+
+                error_title = QLabel(f"Error Loading {tab_name}")
+                error_title.setStyleSheet("color: #ff4444; font-weight: bold; font-size: 12px;")
+                error_layout.addWidget(error_title)
+
+                error_details = QLabel(f"{type(e).__name__}: {str(e)[:200]}")
+                error_details.setStyleSheet("color: #ffaa00; font-size: 10px;")
+                error_details.setWordWrap(True)
+                error_layout.addWidget(error_details)
+
+                error_layout.addStretch()
+
+                # Disconnect to avoid recursive calls
+                self.tabs.currentChanged.disconnect(self._load_tab_on_view)
+                try:
+                    self.tabs.removeTab(index)
+                    self.tabs.insertTab(index, error_widget, tab_name)
+                    self.tabs.setCurrentIndex(index)
+                finally:
+                    self.tabs.currentChanged.connect(self._load_tab_on_view)
+
+                logger.error(f"Failed to load {tab_name}: {e}")
+
+        except Exception as outer_e:
+            logger.exception(f"Unexpected error in _load_tab_on_view: {outer_e}")
+
     def create_overview_tab(self) -> QWidget:
         """Create overview tab with key information."""
         tab = QWidget()
@@ -752,12 +909,15 @@ class ProfileVisualizationWindow(QDialog):
 
             # Create figure with 3 subplots for different views
             fig = Figure(figsize=(15, 4), facecolor='#1e1e1e')
-            canvas = FigureCanvas(fig)
+            canvas = SafeFigureCanvas(fig)
             canvas.setStyleSheet("background-color: #1e1e1e;")
-
-            # Enable interactive mode
-            canvas.setFocusPolicy(Qt.StrongFocus)
             canvas.setMouseTracking(True)
+
+            # Ensure canvas has enough vertical space so titles and x-labels are not clipped
+            # Use a fixed vertical size but allow horizontal expansion in the scroll area
+            canvas.setMinimumHeight(480)
+            canvas.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            self._redirect_canvas_wheel_to_scroll(canvas, scroll)
 
             # Calculate different views
             x_pos = list(range(len(dates)))
@@ -887,7 +1047,12 @@ class ProfileVisualizationWindow(QDialog):
                 ax.set_xticks(tick_positions)
                 ax.set_xticklabels(tick_labels, rotation=45, ha='right', fontsize=7, color='white')
 
-            fig.tight_layout()
+            # Adjust bottom padding to prevent rotated x-labels from being clipped, then tighten layout
+            try:
+                fig.subplots_adjust(bottom=0.18)
+            except Exception:
+                pass
+            fig.tight_layout(pad=2.0)
 
             # Enhanced hover functionality for all three subplots - use closure to capture variables
             def make_hover_handler(chart_ax1, chart_ax2, chart_ax3, chart_annot1, chart_annot2, chart_annot3,
@@ -993,9 +1158,12 @@ class ProfileVisualizationWindow(QDialog):
 
             canvas.mpl_connect("motion_notify_event", make_hover_handler(ax1, ax2, ax3, annot1, annot2, annot3, dates, values, pct_change, indexed, canvas))
 
+            # Redirect the mouse wheel to the scroll area so the entire section scrolls.
+            self._redirect_canvas_wheel_to_scroll(canvas, scroll)
+
             # Make chart clickable to open in interactive window
-            def make_chart_click_handler(chart_dates, chart_values, chart_pct_change, chart_indexed, chart_x_pos, chart_title, chart_ax1, chart_ax2, chart_ax3, y_max_val):
-                """Create click handler with properly captured variables."""
+            def make_chart_click_handler(chart_dates, chart_values, chart_pct_change, chart_indexed, chart_x_pos, chart_title, chart_ax1, chart_ax2, chart_ax3, y_max):
+                """Create click handler with properly captured variables"""
                 def on_click(event):
                     if event.dblclick and event.inaxes:
                         # Create new figure with only the clicked subplot
@@ -1018,9 +1186,9 @@ class ProfileVisualizationWindow(QDialog):
                                 new_ax.set_ylim(y_min - padding, y_max + padding)
 
                             # Smart formatting
-                            if abs(y_max_val) >= 1e9:
+                            if abs(y_max) >= 1e9:
                                 new_ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'${x/1e9:.2f}B'))
-                            elif abs(y_max_val) >= 1e6:
+                            elif abs(y_max) >= 1e6:
                                 new_ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'${x/1e6:.2f}M'))
                             else:
                                 new_ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'${x/1e3:.2f}K'))
@@ -1072,13 +1240,13 @@ class ProfileVisualizationWindow(QDialog):
                         new_fig.tight_layout()
 
                         # Make chart scrollable if there are many data points
-                        # Show initial window of ~100 points, user can pan/scroll to see rest
+                        # Show initial window of ~100 points, user can pan to see rest
                         if len(chart_dates) > 100:
                             initial_window = 100
                             new_ax.set_xlim(-2, initial_window + 2)  # Show first 100 points with small padding
                             # User can use pan tool or scroll to see rest
 
-                        # Open in interactive viewer
+                        # Open interactive viewer
                         viewer = InteractiveChartViewer(new_fig, f"{chart_title} - Interactive View", self)
                         viewer.exec()
                 return on_click
@@ -1097,60 +1265,304 @@ class ProfileVisualizationWindow(QDialog):
         layout.addWidget(scroll)
 
         return tab
-    
+
     def create_ratios_tab(self) -> QWidget:
-        """Create financial ratios tab."""
+        """Create financial ratios tab with radar representation, explanations, and resizable sections."""
         tab = QWidget()
         layout = QVBoxLayout(tab)
-        
-        ratios = self.profile.get('financial_ratios', {})
-        
-        if not ratios:
-            layout.addWidget(QLabel("No financial ratios data available"))
-            return tab
-        
-        fig = Figure(figsize=(12, 6))
-        canvas = FigureCanvas(fig)
-        
-        ax = fig.add_subplot(111)
-        
-        ratio_labels = []
-        ratio_values = []
-        
-        for key, value in ratios.items():
-            if isinstance(value, (int, float)):
-                ratio_labels.append(key.replace('_', ' ').title())
-                ratio_values.append(value)
-        
-        if ratio_labels:
-            bars = ax.barh(ratio_labels, ratio_values, color='#4da6ff')
-            ax.set_xlabel('Value', fontsize=10)
-            ax.set_title('Financial Ratios', fontsize=12, fontweight='bold')
-            ax.grid(True, alpha=0.3, axis='x')
-            
-            for bar in bars:
-                width = bar.get_width()
-                ax.text(width, bar.get_y() + bar.get_height()/2, 
-                       f'{width:.3f}', ha='left', va='center', fontsize=8)
-        
-        fig.tight_layout()
 
-        # Make chart clickable
-        def on_click(event):
+        ratios = self.profile.get('financial_ratios', {}) or {}
+        latest = self.profile.get('latest_financials', {})
+
+        if not ratios and not latest:
+            layout.addWidget(QLabel("No financial ratios or latest financials available"))
+            return tab
+
+        ratios_norm = {k.lower(): v for k, v in ratios.items()}
+
+        def _value_from_latest(*keys):
+            for key in keys:
+                if key in latest and latest.get(key) not in (None, 'N/A'):
+                    try:
+                        return float(latest.get(key))
+                    except Exception:
+                        continue
+            return None
+
+        latest_values = {
+            'assets': _value_from_latest('Assets', 'TotalAssets', 'assets'),
+            'liabilities': _value_from_latest('Liabilities', 'TotalLiabilities', 'liabilities'),
+            'equity': _value_from_latest('StockholdersEquity', 'ShareholdersEquity', 'equity'),
+            'revenues': _value_from_latest('Revenues', 'Revenue', 'SalesRevenueNet'),
+            'net_income': _value_from_latest('NetIncomeLoss', 'NetIncome', 'net_income'),
+            'cash': _value_from_latest('CashAndCashEquivalentsAtCarryingValue', 'Cash', 'cash_and_cash_equivalents'),
+            'current_assets': _value_from_latest('CurrentAssets', 'current_assets'),
+            'current_liabilities': _value_from_latest('CurrentLiabilities', 'current_liabilities')
+        }
+
+        ratio_specs = [
+            {'key': 'current_ratio', 'label': 'Current Ratio', 'formula': 'Current Assets / Current Liabilities',
+             'explanation': 'Liquidity: ability to cover near-term obligations.', 'target': 1.5, 'precision': 2},
+            {'key': 'cash_ratio', 'label': 'Cash Ratio', 'formula': 'Cash / Current Liabilities',
+             'explanation': 'Cash cushion: more conservative liquidity view.', 'target': 1.0, 'precision': 2},
+            {'key': 'debt_to_equity', 'label': 'Debt to Equity', 'formula': 'Total Liabilities / Equity',
+             'explanation': 'Leverage: lower values preferred.', 'target': 1.5, 'precision': 2},
+            {'key': 'debt_to_assets', 'label': 'Debt to Assets', 'formula': 'Total Liabilities / Assets',
+             'explanation': 'Indicates what portion of assets is financed by debt.', 'target': 0.6, 'precision': 2},
+            {'key': 'profit_margin', 'label': 'Profit Margin', 'formula': 'Net Income / Revenues',
+             'explanation': 'How much revenue remains as profit.', 'percent': True, 'target': 0.15, 'precision': 1},
+            {'key': 'asset_turnover', 'label': 'Asset Turnover', 'formula': 'Revenue / Assets',
+             'explanation': 'Efficiency: revenue per dollar of assets.', 'target': 1.0, 'precision': 2},
+            {'key': 'return_on_equity', 'label': 'Return on Equity (ROE)', 'formula': 'Net Income / Equity',
+             'explanation': 'Shareholder return: compare to cost of equity.', 'percent': True, 'target': 0.18, 'precision': 1},
+            {'key': 'return_on_assets', 'label': 'Return on Assets (ROA)', 'formula': 'Net Income / Assets',
+             'explanation': 'Overall profitability independent of capital structure.', 'percent': True, 'target': 0.12, 'precision': 1},
+        ]
+
+        def _from_ratios(candidate_keys):
+            for candidate in candidate_keys:
+                candidate = candidate.lower()
+                val = ratios_norm.get(candidate)
+                if isinstance(val, (int, float)):
+                    return float(val)
+                try:
+                    return float(str(val))
+                except Exception:
+                    continue
+            return None
+
+        computed = []
+        for spec in ratio_specs:
+            value = _from_ratios([spec['key'], spec['key'].replace('_', ''), spec['key'].replace('_', ' ')])
+            source = 'Reported'
+            if value is None:
+                try:
+                    if spec['key'] == 'current_ratio':
+                        ca = latest_values['current_assets']; cl = latest_values['current_liabilities']
+                        if ca is not None and cl:
+                            value = ca / cl; source = 'Derived'
+                    elif spec['key'] == 'cash_ratio':
+                        cash = latest_values['cash']; cl = latest_values['current_liabilities']
+                        if cash is not None and cl:
+                            value = cash / cl; source = 'Derived'
+                    elif spec['key'] == 'debt_to_equity':
+                        liab = latest_values['liabilities']; equity = latest_values['equity']
+                        if liab is not None and equity:
+                            value = liab / equity; source = 'Derived'
+                    elif spec['key'] == 'debt_to_assets':
+                        liab = latest_values['liabilities']; assets = latest_values['assets']
+                        if liab is not None and assets:
+                            value = liab / assets; source = 'Derived'
+                    elif spec['key'] == 'profit_margin':
+                        ni = latest_values['net_income']; rev = latest_values['revenues']
+                        if ni is not None and rev:
+                            value = ni / rev; source = 'Derived'
+                    elif spec['key'] == 'asset_turnover':
+                        rev = latest_values['revenues']; assets = latest_values['assets']
+                        if rev is not None and assets:
+                            value = rev / assets; source = 'Derived'
+                    elif spec['key'] == 'return_on_equity':
+                        ni = latest_values['net_income']; equity = latest_values['equity']
+                        if ni is not None and equity:
+                            value = ni / equity; source = 'Derived'
+                    elif spec['key'] == 'return_on_assets':
+                        ni = latest_values['net_income']; assets = latest_values['assets']
+                        if ni is not None and assets:
+                            value = ni / assets; source = 'Derived'
+                except Exception:
+                    continue
+            if value is not None:
+                computed.append((spec, float(value), source))
+
+        if not computed:
+            layout.addWidget(QLabel("No numeric ratio data could be computed or reported."))
+            return tab
+
+        settings = QSettings("FundamentalDataPipeline", "ProfileVisualization")
+
+        def _restore_splitter_state(splitter_obj, key, fallback_sizes):
+            state = settings.value(key)
+            if isinstance(state, QByteArray):
+                try:
+                    splitter_obj.restoreState(state)
+                    return
+                except Exception:
+                    pass
+            elif state:
+                try:
+                    splitter_obj.restoreState(QByteArray(state))
+                    return
+                except Exception:
+                    pass
+            splitter_obj.setSizes(fallback_sizes)
+
+        def _persist_splitter_state(key, splitter_obj):
+            settings.setValue(key, splitter_obj.saveState())
+
+        main_splitter = QSplitter(Qt.Vertical)
+        _restore_splitter_state(main_splitter, 'ratios/main_splitter_state', [480, 260])
+        main_splitter.splitterMoved.connect(lambda pos, idx: _persist_splitter_state('ratios/main_splitter_state', main_splitter))
+
+        top_splitter = QSplitter(Qt.Horizontal)
+        _restore_splitter_state(top_splitter, 'ratios/top_horizontal_state', [800, 400])
+        top_splitter.splitterMoved.connect(lambda pos, idx: _persist_splitter_state('ratios/top_horizontal_state', top_splitter))
+
+        # Radar chart area
+        chart_widget = QWidget()
+        chart_layout = QVBoxLayout(chart_widget)
+        chart_layout.setContentsMargins(0, 0, 0, 0)
+
+        fig = Figure(figsize=(8, 5), facecolor='#1e1e1e')
+        canvas = SafeFigureCanvas(fig)
+        ax = fig.add_subplot(111, polar=True, facecolor='#1e1e1e')
+
+        sorted_specs = sorted(computed, key=lambda item: item[0]['label'])
+        labels = [item[0]['label'] for item in sorted_specs]
+        targets = [item[0].get('target', 1) for item in sorted_specs]
+        raw_values = [item[1] for item in sorted_specs]
+        normalized = []
+        for value, target in zip(raw_values, targets):
+            if target and target != 0:
+                normalized.append(min(1.2, max(0.0, value / target)))
+            else:
+                normalized.append(0.0)
+
+        angles = np.linspace(0, 2 * np.pi, len(labels), endpoint=False).tolist()
+        base_angles = angles[:]
+        base_normalized = normalized[:]
+        normalized.append(normalized[0])
+        angles.append(angles[0])
+
+        ax.plot(angles, normalized, color='#4da6ff', linewidth=2)
+        ax.fill(angles, normalized, color='#4da6ff', alpha=0.25)
+        ax.set_xticks(np.array(angles[:-1]))
+        ax.set_xticklabels(labels, fontsize=10, color='white')
+        ax.set_ylim(0, 1.2)
+        ax.set_yticks([0.4, 0.8, 1.2])
+        ax.set_yticklabels(['Subpar', 'On Track', 'Exceeds'], fontsize=8, color='white')
+
+        def _format_value(value, percent=False):
+            if value is None:
+                return 'N/A'
+            if percent:
+                return f"{value * 100:.1f}%"
+            if abs(value) >= 1e6:
+                return f"{value / 1e6:.2f}M"
+            if abs(value) >= 1e3:
+                return f"{value / 1e3:.2f}K"
+            return f"{value:.2f}"
+
+        radar_points = []
+        for (spec, raw_value, source), angle, norm_val, target in zip(sorted_specs, base_angles, base_normalized, targets):
+            radar_points.append({
+                'angle': angle,
+                'normalized': norm_val,
+                'label': spec['label'],
+                'value': raw_value,
+                'target': target,
+                'source': source,
+                'percent': spec.get('percent', False),
+                'formatted_value': _format_value(raw_value, spec.get('percent', False)),
+                'formatted_target': _format_value(target, spec.get('percent', False))
+            })
+
+        hover_annot = ax.annotate("", xy=(0, 0), xytext=(15, 15), textcoords="offset points",
+                                 bbox=dict(boxstyle="round,pad=0.7", fc="#1e1e1e", ec="#4da6ff", alpha=0.95, linewidth=2),
+                                 arrowprops=dict(arrowstyle="->", connectionstyle="arc3,rad=.2",
+                                                 color="#4da6ff", lw=2),
+                                 fontsize=10, color="white", weight='bold', zorder=1000)
+        hover_annot.set_visible(False)
+
+        def on_radar_hover(event):
+            if event.inaxes != ax or event.xdata is None or event.ydata is None:
+                if hover_annot.get_visible():
+                    hover_annot.set_visible(False)
+                    canvas.draw_idle()
+                return
+
+            angle = event.xdata % (2 * np.pi)
+            closest = None
+            min_diff = float('inf')
+            for point in radar_points:
+                diff = abs((angle - point['angle'] + np.pi) % (2 * np.pi) - np.pi)
+                if diff < min_diff:
+                    min_diff = diff
+                    closest = point
+
+            if closest and min_diff < 0.35:
+                hover_annot.xy = (closest['angle'], max(closest['normalized'], 0.05))
+                text = (f"{closest['label']}\nValue: {closest['formatted_value']}\n"
+                        f"Target: {closest['formatted_target']}\nSource: {closest['source']}")
+                hover_annot.set_text(text)
+                if not hover_annot.get_visible():
+                    hover_annot.set_visible(True)
+                canvas.draw_idle()
+            elif hover_annot.get_visible():
+                hover_annot.set_visible(False)
+                canvas.draw_idle()
+
+        canvas.mpl_connect("motion_notify_event", on_radar_hover)
+
+        def _on_click(event):
             if event.dblclick:
-                viewer = InteractiveChartViewer(fig, "Financial Ratios - Interactive View", self)
+                viewer = InteractiveChartViewer(fig, "Financial Ratios - Radar View", self)
                 viewer.exec()
 
-        canvas.mpl_connect("button_press_event", on_click)
+        canvas.mpl_connect("button_press_event", _on_click)
+        chart_layout.addWidget(canvas)
+        top_splitter.addWidget(chart_widget)
 
-        layout.addWidget(canvas)
-        
-        instruction_label = QLabel("💡 Double-click to open interactive view")
-        instruction_label.setStyleSheet("color: #4da6ff; font-size: 10px; padding: 5px; font-style: italic;")
-        layout.addWidget(instruction_label)
+        table_group = QGroupBox('Ratio Details & Interpretation')
+        table_layout = QVBoxLayout(table_group)
+        table = QTableWidget()
+        table.setColumnCount(4)
+        table.setHorizontalHeaderLabels(['Ratio', 'Value', 'Formula / Source', 'Interpretation'])
+        table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+        table.verticalHeader().setVisible(False)
+
+        table.setRowCount(len(sorted_specs))
+        for row_idx, (spec, raw_value, source) in enumerate(sorted_specs):
+            display_value = _format_value(raw_value, spec.get('percent', False))
+            table.setItem(row_idx, 0, QTableWidgetItem(spec['label']))
+            table.setItem(row_idx, 1, QTableWidgetItem(display_value))
+            formula_text = spec.get('formula', 'Reported')
+            table.setItem(row_idx, 2, QTableWidgetItem(f"{formula_text} ({source})"))
+            interp_item = QTableWidgetItem(spec.get('explanation', ''))
+            interp_item.setFlags(interp_item.flags() & ~Qt.ItemIsEditable)
+            table.setItem(row_idx, 3, interp_item)
+
+        table_layout.addWidget(table)
+        table_group.setMinimumHeight(250)
+
+        expl_group = QGroupBox('How to Use These Ratios')
+        expl_layout = QVBoxLayout(expl_group)
+        expl_text = QLabel(
+            '• Liquidity (Current/Cash ratios) highlights how comfortably the firm covers short-term debts; values above 1.0 are typical comfort zones.\n'
+            '• Leverage (Debt/Equity, Debt/Assets) should be compared to industry norms; higher values signal reliance on debt.\n'
+            '• Profitability (ROA, ROE, Profit Margin) shows earnings efficiency; compare them to peers and the cost of capital.\n'
+            '• Efficiency (Asset Turnover) reveals how effectively assets generate revenue.\n'
+            '• This radar normalizes each ratio to a healthy target so you can spot strengths/weaknesses at a glance.'
+        )
+        expl_text.setWordWrap(True)
+        expl_text.setStyleSheet('color: #ccc; padding: 5px;')
+        expl_layout.addWidget(expl_text)
+        top_splitter.addWidget(expl_group)
+
+        floppy_instruction = QLabel("💡 Double-click the radar chart to open an interactive view.")
+        floppy_instruction.setStyleSheet("color: #4da6ff; font-size: 10px; padding: 5px;")
+        expl_layout.addWidget(floppy_instruction)
+
+        top_container = QWidget()
+        top_container.setLayout(QVBoxLayout())
+        top_container.layout().setContentsMargins(0, 0, 0, 0)
+        top_container.layout().addWidget(top_splitter)
+        main_splitter.addWidget(top_container)
+        main_splitter.addWidget(table_group)
+
+        layout.addWidget(main_splitter)
 
         return tab
-    
+
     def create_growth_tab(self) -> QWidget:
         """Create growth analysis tab with comprehensive period data."""
         tab = QWidget()
@@ -1190,9 +1602,15 @@ class ProfileVisualizationWindow(QDialog):
 
             # Create larger figure for each metric - IMPORTANT: Keep reference!
             fig = Figure(figsize=(14, 5), facecolor='#1e1e1e')
-            canvas = FigureCanvas(fig)
+            canvas = SafeFigureCanvas(fig)
             canvas.setStyleSheet("background-color: #1e1e1e;")
             canvas.setMouseTracking(True)
+
+            # Ensure canvas has enough vertical space so titles and x-labels are not clipped
+            # Use a fixed vertical size but allow horizontal expansion in the scroll area
+            canvas.setMinimumHeight(480)
+            canvas.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            self._redirect_canvas_wheel_to_scroll(canvas, scroll)
 
             # Create main chart
             ax = fig.add_subplot(111, facecolor='#2d2d2d')
@@ -1416,6 +1834,7 @@ class ProfileVisualizationWindow(QDialog):
                         num_labels_to_show = min(20, len(captured_periods))
                         step = max(1, len(captured_periods) // num_labels_to_show)
                         tick_positions = list(range(0, len(captured_periods), step))
+                        # Always include the last position
                         if tick_positions[-1] != len(captured_periods) - 1:
                             tick_positions.append(len(captured_periods) - 1)
 
@@ -1465,66 +1884,209 @@ class ProfileVisualizationWindow(QDialog):
         return tab
     
     def create_health_tab(self) -> QWidget:
-        """Create health indicators tab with gauge visualizations."""
+        """Create health indicators tab with redesigned cards, radar, and guidance."""
         tab = QWidget()
         layout = QVBoxLayout(tab)
-        
+
         health = self.profile.get('health_indicators', {})
-        
+        latest = self.profile.get('latest_financials', {})
+
         if not health:
             layout.addWidget(QLabel("No health indicator data available"))
             return tab
-        
-        fig = Figure(figsize=(12, 6))
-        canvas = FigureCanvas(fig)
-        
-        scores = [
-            ('Overall Health', health.get('overall_health_score', 0)),
-            ('Profitability', health.get('profitability_score', 0)),
-            ('Leverage', health.get('leverage_score', 0)),
-            ('Growth', health.get('growth_score', 0))
-        ]
-        
-        for idx, (label, score) in enumerate(scores, 1):
-            ax = fig.add_subplot(2, 2, idx, projection='polar')
-            
-            theta = np.linspace(0, np.pi, 100)
-            r = np.ones(100)
-            
-            ax.plot(theta, r, color='lightgray', linewidth=20, solid_capstyle='round')
-            
-            score_theta = np.linspace(0, np.pi * (score / 100), 100)
-            color = 'green' if score >= 70 else 'orange' if score >= 50 else 'red'
-            ax.plot(score_theta, r, color=color, linewidth=20, solid_capstyle='round')
-            
-            ax.set_ylim(0, 1.5)
-            ax.set_yticks([])
-            ax.set_xticks([])
-            ax.spines['polar'].set_visible(False)
-            
-            ax.text(np.pi/2, 0.5, f'{score:.1f}', ha='center', va='center', 
-                   fontsize=20, fontweight='bold')
-            ax.text(np.pi/2, 0.2, label, ha='center', va='center', 
-                   fontsize=10)
-        
-        fig.tight_layout()
 
-        # Make chart clickable
-        def on_click(event):
+        def _safe_number(value):
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                return None
+
+        def _safe_ratio(num_key, denom_key):
+            numerator = _safe_number(latest.get(num_key))
+            denominator = _safe_number(latest.get(denom_key))
+            if numerator is None or denominator in (None, 0):
+                return None
+            return numerator / denominator
+
+        indicator_summary = [
+            {
+                'label': 'Overall Health',
+                'value': health.get('overall_health_score', 0),
+                'target': '≥ 70',
+                'meaning': 'Composite view across profitability, leverage, growth, and liquidity.'
+            },
+            {
+                'label': 'Profitability',
+                'value': health.get('profitability_score', 0),
+                'target': '≥ 70',
+                'meaning': 'Reflects ROA/ROE and margin efficiency.'
+            },
+            {
+                'label': 'Leverage',
+                'value': health.get('leverage_score', 0),
+                'target': '≤ 50',
+                'meaning': 'Tracks debt pressure relative to capital and cash flows.'
+            },
+            {
+                'label': 'Growth',
+                'value': health.get('growth_score', 0),
+                'target': '≥ 60',
+                'meaning': 'Revenue and earnings momentum compared to history.'
+            }
+        ]
+
+        derived_metrics = [
+            {
+                'label': 'Current Ratio',
+                'value': _safe_ratio('CurrentAssets', 'CurrentLiabilities'),
+                'target': '≥ 1.5',
+                'calc': 'Current Assets / Current Liabilities',
+                'meaning': 'Liquidity buffer versus short-term debt.'
+            },
+            {
+                'label': 'Debt to Equity',
+                'value': _safe_ratio('Liabilities', 'StockholdersEquity'),
+                'target': '≤ 1.25',
+                'calc': 'Total Liabilities / Stockholders Equity',
+                'meaning': 'Measures financial leverage.'
+            },
+            {
+                'label': 'Profitability Premium',
+                'value': _safe_ratio('NetIncomeLoss', 'Revenues'),
+                'target': '≥ 10%',
+                'calc': 'Net Income / Revenue',
+                'meaning': 'Highlights net margin context.'
+            }
+        ]
+
+        def _color_for_score(score):
+            if score is None:
+                return '#555555'
+            if score >= 70:
+                return '#4CAF50'
+            if score >= 50:
+                return '#FFB300'
+            return '#F44336'
+
+        main_vertical = QSplitter(Qt.Vertical)
+        description_splitter = QSplitter(Qt.Horizontal)
+
+        cards_widget = QWidget()
+        cards_layout = QGridLayout(cards_widget)
+        cards_layout.setSpacing(12)
+
+        for idx, metric in enumerate(indicator_summary):
+            card = QWidget()
+            card.setStyleSheet("background-color: #1d1d1d; border: 1px solid #2e2e2e; border-radius: 8px;")
+            card_layout = QVBoxLayout(card)
+            card_layout.setContentsMargins(12, 12, 12, 10)
+
+            title = QLabel(metric['label'])
+            title.setFont(QFont("Segoe UI", 10, QFont.Bold))
+            title.setStyleSheet("color: #9aa8bd;")
+
+            value = metric['value']
+            value_label = QLabel("N/A" if value is None else f"{value:.1f}")
+            value_label.setFont(QFont("Segoe UI", 24, QFont.Bold))
+            value_label.setStyleSheet(f"color: {_color_for_score(value)};")
+
+            target_label = QLabel(f"Target: {metric['target']}")
+            target_label.setStyleSheet("color: #cccccc; font-size: 11px;")
+
+            desc_label = QLabel(metric['meaning'])
+            desc_label.setWordWrap(True)
+            desc_label.setStyleSheet("color: #b4b9c4; font-size: 11px;")
+
+            progress = QProgressBar()
+            progress.setRange(0, 100)
+            progress_value = int(metric['value']) if metric['value'] is not None else 0
+            progress.setValue(max(0, min(100, progress_value)))
+            progress.setStyleSheet("QProgressBar {border: 1px solid #2e2e2e; border-radius: 6px; background: #272727;} QProgressBar::chunk {background-color: #4da6ff; border-radius: 6px;}")
+
+            card_layout.addWidget(title)
+            card_layout.addWidget(value_label)
+            card_layout.addWidget(target_label)
+            card_layout.addWidget(progress)
+            card_layout.addWidget(desc_label)
+
+            cards_layout.addWidget(card, idx // 2, idx % 2)
+
+        description_splitter.addWidget(cards_widget)
+
+        radar_widget = QWidget()
+        radar_layout = QVBoxLayout(radar_widget)
+        radar_layout.setContentsMargins(0, 0, 0, 0)
+        radar_fig = Figure(figsize=(6, 5), facecolor='#1e1e1e')
+        radar_ax = radar_fig.add_subplot(111, polar=True, facecolor='#1e1e1e')
+
+        radar_labels = [m['label'] for m in indicator_summary]
+        radar_values = [min(max(m['value'] / 100.0 if m['value'] is not None else 0, 0), 1) for m in indicator_summary]
+        radar_angles = np.linspace(0, 2 * np.pi, len(radar_labels), endpoint=False).tolist()
+        radar_values += [radar_values[0]]
+        radar_angles += [radar_angles[0]]
+        radar_ax.plot(radar_angles, radar_values, color='#4da6ff', linewidth=2)
+        radar_ax.fill(radar_angles, radar_values, color='#4da6ff', alpha=0.25)
+        radar_ax.set_xticks(radar_angles[:-1])
+        radar_ax.set_xticklabels(radar_labels, color='white', fontsize=9)
+        radar_ax.set_ylim(0, 1.1)
+        radar_ax.set_yticks([0.25, 0.5, 0.75, 1.0])
+        radar_ax.set_yticklabels(['25', '50', '75', '100'], color='white', fontsize=8)
+        radar_ax.set_title('Health Profile vs Targets', fontweight='bold', color='white', pad=15)
+        radar_canvas = SafeFigureCanvas(radar_fig)
+        radar_canvas.setStyleSheet("background-color: transparent;")
+        radar_canvas.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        radar_layout.addWidget(radar_canvas)
+
+        derived_group = QGroupBox('Derived Ratios Driving Health')
+        derived_layout = QVBoxLayout(derived_group)
+        derived_table = QTableWidget()
+        derived_table.setColumnCount(4)
+        derived_table.setHorizontalHeaderLabels(['Ratio', 'Value', 'Calculation / Target', 'Meaning'])
+        derived_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        derived_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+        derived_table.verticalHeader().setVisible(False)
+        derived_table.setRowCount(len(derived_metrics))
+        for idx, metric in enumerate(derived_metrics):
+            derived_table.setItem(idx, 0, QTableWidgetItem(metric['label']))
+            val = metric['value']
+            derived_table.setItem(idx, 1, QTableWidgetItem('N/A' if val is None else f"{val:.2f}"))
+            derived_table.setItem(idx, 2, QTableWidgetItem(f"{metric['calc']} ({metric['target']})"))
+            meaning_item = QTableWidgetItem(metric['meaning'])
+            meaning_item.setFlags(meaning_item.flags() & ~Qt.ItemIsEditable)
+            derived_table.setItem(idx, 3, meaning_item)
+        derived_layout.addWidget(derived_table)
+        radar_layout.addWidget(derived_group)
+
+        description_splitter.addWidget(radar_widget)
+
+        guide_group = QGroupBox('Indicator Guide & Calculations')
+        guide_layout = QVBoxLayout(guide_group)
+        guide_text = (
+            "• Overall Health Score – normalized blend of profitability, leverage, liquidity, and growth inputs.\n"
+            "• Profitability Score – tracks ROA, ROE, and profit margin relative to healthy thresholds.\n"
+            "• Leverage Score – measured by debt levels relative to equity/cash generation; lower is conservative.\n"
+            "• Growth Score – captures recent revenue and net income momentum.\n"
+            "• Current Ratio – liquidity buffer for short-term claims.\n"
+            "• Debt to Equity – assessment of levered capital structure.\n"
+            "• Profitability Premium – derived margin spotlight to compare earnings quality."
+        )
+        guide_label = QLabel(guide_text)
+        guide_label.setWordWrap(True)
+        guide_label.setStyleSheet('color: #ccc; font-size: 11px; padding: 8px;')
+        guide_layout.addWidget(guide_label)
+        main_vertical.addWidget(guide_group)
+
+        layout.addWidget(main_vertical)
+
+        def _open_radar(event):
             if event.dblclick:
-                viewer = InteractiveChartViewer(fig, "Health Indicators - Interactive View", self)
+                viewer = InteractiveChartViewer(radar_fig, "Health Indicators - Interactive View", self)
                 viewer.exec()
 
-        canvas.mpl_connect("button_press_event", on_click)
-
-        layout.addWidget(canvas)
-        
-        instruction_label = QLabel("💡 Double-click to open interactive view")
-        instruction_label.setStyleSheet("color: #4da6ff; font-size: 10px; padding: 5px; font-style: italic;")
-        layout.addWidget(instruction_label)
+        radar_canvas.mpl_connect("button_press_event", _open_radar)
 
         return tab
-    
+
     def create_key_persons_tab(self) -> QWidget:
         """Create Key Persons tab showing executives, board, insiders, and holding companies."""
         tab = QWidget()
@@ -1855,390 +2417,189 @@ class ProfileVisualizationWindow(QDialog):
         return tab
     
     def create_relationship_graph_tab(self) -> QWidget:
-        """Create interactive relationship graph visualization tab."""
+        """Display relationships with a graph, filters, and detailed table."""
         tab = QWidget()
         layout = QVBoxLayout(tab)
 
-        # Add matplotlib canvas
-        try:
-            import matplotlib.pyplot as plt
-            import networkx as nx
-            from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
-            from matplotlib.figure import Figure
+        relationships_data = self.profile.get('relationships', {})
+        relationships = relationships_data.get('relationships', [])
 
-            relationships_data = self.profile.get('relationships', {})
-            relationships = relationships_data.get('relationships', [])
+        if not relationships:
+            msg = QLabel("No relationship data available for visualization")
+            msg.setAlignment(Qt.AlignCenter)
+            msg.setStyleSheet("color: #888; padding: 20px; font-size: 14px;")
+            layout.addWidget(msg)
+            return tab
 
-            if not relationships:
-                no_data = QLabel("No relationship data available for visualization")
-                no_data.setAlignment(Qt.AlignCenter)
-                no_data.setStyleSheet("color: #888; padding: 20px; font-size: 14px;")
-                layout.addWidget(no_data)
-                return tab
+        main_splitter = QSplitter(Qt.Vertical)
+        top_splitter = QSplitter(Qt.Horizontal)
 
-            # Info panel
-            info_group = QGroupBox("Graph Information")
-            info_layout = QHBoxLayout(info_group)
+        graph_container = QWidget()
+        graph_layout = QVBoxLayout(graph_container)
+        graph_layout.setSpacing(10)
+        graph_layout.setContentsMargins(0, 0, 0, 0)
 
-            company_info = self.profile.get('company_info', {})
-            ticker = company_info.get('ticker', 'N/A')
-            company_name = company_info.get('name') or company_info.get('title', 'Unknown')
+        info_widget = QWidget()
+        info_layout = QHBoxLayout(info_widget)
+        info_layout.setContentsMargins(0, 0, 0, 0)
+        info_layout.setSpacing(8)
 
-            info_layout.addWidget(QLabel(f"<b>Company:</b> {ticker} - {company_name}"))
-            info_layout.addWidget(QLabel(f"<b>Total Relationships:</b> {len(relationships)}"))
+        company_info = self.profile.get('company_info', {})
+        ticker = company_info.get('ticker', 'N/A')
+        company_name = company_info.get('name') or company_info.get('title', 'Unknown')
 
-            # Count by type
-            type_counts = {}
-            for rel in relationships:
-                rel_type = rel.get('relationship_type', 'unknown')
-                type_counts[rel_type] = type_counts.get(rel_type, 0) + 1
+        total_label = QLabel(f"<b>{ticker} - {company_name}</b>")
+        total_label.setStyleSheet("color: #fff;")
+        count_label = QLabel(f"Total Relationships: {len(relationships)}")
+        count_label.setStyleSheet("color: #9aa8bd;")
+        info_layout.addWidget(total_label)
+        info_layout.addWidget(count_label)
 
-            types_text = ", ".join([f"{t}: {c}" for t, c in sorted(type_counts.items())])
-            info_layout.addWidget(QLabel(f"<b>By Type:</b> {types_text}"))
-            layout.addWidget(info_group)
+        type_counts = {}
+        for rel in relationships:
+            rel_type = rel.get('relationship_type', 'unknown')
+            type_counts[rel_type] = type_counts.get(rel_type, 0) + 1
 
-            # Create matplotlib figure
-            fig = Figure(figsize=(14, 10), facecolor='#1e1e1e')
-            canvas = FigureCanvas(fig)
-            ax = fig.add_subplot(111, facecolor='#2d2d2d')
+        filter_combo = QPushButton("Filter by Type")
+        filter_combo.setCursor(Qt.PointingHandCursor)
+        filter_menu = QWidget()
+        # For simplicity we use a menu-like popup list
+        filter_combo.clicked.connect(lambda: QMessageBox.information(self, "Filter", "Filtering coming soon"))
+        info_layout.addWidget(filter_combo)
 
-            # Build network graph
-            G = nx.DiGraph()
+        top_splitter.addWidget(info_widget)
 
-            # Add center node (source company)
-            source_cik = self.profile.get('cik', '')
-            G.add_node(source_cik, label=ticker, node_type='source')
+        fig = Figure(figsize=(12, 8), facecolor='#1e1e1e')
+        canvas = SafeFigureCanvas(fig)
+        ax = fig.add_subplot(111, facecolor='#2d2d2d')
 
-            # Create name mapping for better labels
-            cik_to_name = {source_cik: ticker}
+        import networkx as nx
 
-            # Add relationships
-            for rel in relationships:
-                target_cik = rel.get('target_cik', '')
-                target_name = rel.get('target_name', 'Unknown')
-                rel_type = rel.get('relationship_type', 'unknown')
-                confidence = rel.get('confidence_score', 0)
+        G = nx.DiGraph()
+        source_cik = self.profile.get('cik', '')
+        G.add_node(source_cik, label=ticker, node_type='source')
 
-                # Clean up target name (remove "N/A - " prefix if present)
-                if target_name and target_name.startswith('N/A - '):
-                    target_name = target_name.replace('N/A - ', '')
+        cik_to_name = {source_cik: ticker}
 
-                # Store clean name
-                if target_cik:
-                    cik_to_name[target_cik] = target_name[:20]  # Truncate long names
-                    G.add_node(target_cik, label=target_name, node_type=rel_type)
-                    G.add_edge(source_cik, target_cik,
-                             relationship=rel_type,
-                             confidence=confidence)
+        for rel in relationships:
+            target_cik = rel.get('target_cik', '')
+            target_name = rel.get('target_name', 'Unknown')
+            rel_type = rel.get('relationship_type', 'unknown')
+            confidence = rel.get('confidence_score', 0)
+            if not target_cik or not target_name:
+                continue
+            if target_name.startswith('N/A - '):
+                target_name = target_name.replace('N/A - ', '')
+            cik_to_name[target_cik] = target_name[:20]
+            G.add_node(target_cik, label=target_name, node_type=rel_type)
+            G.add_edge(source_cik, target_cik, relationship=rel_type, confidence=confidence)
 
-            # Layout - circular around center
-            pos = nx.spring_layout(G, k=2, iterations=50, seed=42)
+        pos = nx.spring_layout(G, k=2, iterations=50, seed=42)
+        if source_cik in pos:
+            all_coords = list(pos.values())
+            center_x = sum(x for x, y in all_coords) / len(all_coords)
+            center_y = sum(y for x, y in all_coords) / len(all_coords)
+            pos[source_cik] = (center_x, center_y)
 
-            # Ensure source node is in center
-            if source_cik in pos:
-                all_coords = list(pos.values())
-                center_x = sum(x for x, y in all_coords) / len(all_coords)
-                center_y = sum(y for x, y in all_coords) / len(all_coords)
-                pos[source_cik] = (center_x, center_y)
+        self.graph_G = G
+        self.graph_pos = pos
+        self.graph_cik_to_name = cik_to_name
+        self.selected_node = None
+        self.drag_offset = None
+        self.is_dragging = False
 
-            # Store for interactivity
-            self.graph_G = G
-            self.graph_pos = pos
-            self.graph_cik_to_name = cik_to_name
-            self.selected_node = None
-            self.drag_offset = None
-            self.is_dragging = False
-            self.last_hover_node = None
+        edge_colors = {
+            'supplier': '#28a745',
+            'customer': '#007bff',
+            'competitor': '#dc3545',
+            'partner': '#ffc107',
+            'investor': '#17a2b8',
+            'related_company': '#6c757d'
+        }
 
-            # Draw edges with colors by type
-            edge_colors = {
-                'supplier': '#28a745',
-                'customer': '#007bff',
-                'competitor': '#dc3545',
-                'partner': '#ffc107',
-                'investor': '#17a2b8',
-                'related_company': '#6c757d'
-            }
+        for edge in G.edges(data=True):
+            src, dst, data = edge
+            rel_type = data.get('relationship', 'unknown')
+            color = edge_colors.get(rel_type, '#6c757d')
+            confidence = data.get('confidence', 0)
+            nx.draw_networkx_edges(G, pos, edgelist=[(src, dst)], edge_color=color,
+                                   alpha=min(0.3 + confidence * 0.7, 1.0), width=1 + confidence * 2,
+                                   arrows=True, arrowsize=10, ax=ax)
 
-            for edge in G.edges(data=True):
-                source, target, data = edge
-                rel_type = data.get('relationship', 'unknown')
-                color = edge_colors.get(rel_type, '#6c757d')
-                confidence = data.get('confidence', 0)
+        nx.draw_networkx_nodes(G, pos, nodelist=[source_cik], node_color='#4da6ff', node_size=3000, alpha=0.9, ax=ax)
+        target_nodes = [n for n in G.nodes() if n != source_cik]
+        if target_nodes:
+            nx.draw_networkx_nodes(G, pos, nodelist=target_nodes, node_color='#7fb3d5', node_size=1000, alpha=0.7, ax=ax)
 
-                nx.draw_networkx_edges(
-                    G, pos,
-                    edgelist=[(source, target)],
-                    edge_color=color,
-                    alpha=min(0.3 + confidence * 0.7, 1.0),
-                    width=1 + confidence * 2,
-                    arrows=True,
-                    arrowsize=10,
-                    ax=ax
-                )
+        labels = {node: cik_to_name.get(node, 'Unknown') for node in G.nodes()}
+        nx.draw_networkx_labels(G, pos, labels={source_cik: labels[source_cik]}, font_size=12, font_weight='bold', font_color='white', ax=ax)
+        nx.draw_networkx_labels(G, pos, labels={k: v for k, v in labels.items() if k != source_cik}, font_size=8, font_weight='bold', font_color='white', ax=ax)
 
-            # Draw nodes
-            # Source node (larger, special color)
-            nx.draw_networkx_nodes(
-                G, pos,
-                nodelist=[source_cik],
-                node_color='#4da6ff',
-                node_size=3000,
-                alpha=0.9,
-                ax=ax
-            )
+        ax.set_title(f'Relationship Network for {ticker}', fontsize=16, fontweight='bold', color='white', pad=20)
+        ax.axis('off')
 
-            # Target nodes (uniform color for clarity)
-            target_nodes = [n for n in G.nodes() if n != source_cik]
-            if target_nodes:
-                nx.draw_networkx_nodes(
-                    G, pos,
-                    nodelist=target_nodes,
-                    node_color='#7fb3d5',
-                    node_size=1000,
-                    alpha=0.7,
-                    ax=ax
-                )
+        from matplotlib.patches import Patch
+        legend_elements = [Patch(facecolor=color, label=rel_type.title()) for rel_type, color in edge_colors.items() if rel_type in type_counts]
+        ax.legend(handles=legend_elements, loc='upper right', facecolor='#2d2d2d', edgecolor='white', labelcolor='white', fontsize=10)
 
-            # Draw labels using clean company names
-            labels = {node: cik_to_name.get(node, 'Unknown') for node in G.nodes()}
+        graph_layout.addWidget(canvas)
+        graph_layout.addWidget(info_widget)
+        top_splitter.addWidget(graph_container)
 
-            # Source label (larger)
-            nx.draw_networkx_labels(
-                G, pos,
-                labels={source_cik: labels[source_cik]},
-                font_size=12,
-                font_weight='bold',
-                font_color='white',
-                ax=ax
-            )
+        stats_group = QGroupBox("Relationship Statistics")
+        stats_layout = QVBoxLayout(stats_group)
+        stats_table = QTableWidget()
+        stats_table.setColumnCount(3)
+        stats_table.setHorizontalHeaderLabels(["Relationship Type", "Count", "Avg Confidence"])
+        stats_table.setRowCount(len(type_counts))
+        for i, (rel_type, count) in enumerate(sorted(type_counts.items(), key=lambda x: x[1], reverse=True)):
+            type_rels = [r for r in relationships if r.get('relationship_type') == rel_type]
+            avg_conf = sum(r.get('confidence_score', 0) for r in type_rels) / len(type_rels) if type_rels else 0
+            stats_table.setItem(i, 0, QTableWidgetItem(rel_type.title()))
+            stats_table.setItem(i, 1, QTableWidgetItem(str(count)))
+            conf_item = QTableWidgetItem(f"{avg_conf:.2f}")
+            if avg_conf >= 0.8:
+                conf_item.setForeground(QColor("#28a745"))
+            elif avg_conf >= 0.6:
+                conf_item.setForeground(QColor("#ffc107"))
+            else:
+                conf_item.setForeground(QColor("#dc3545"))
+            stats_table.setItem(i, 2, conf_item)
+        stats_table.resizeColumnsToContents()
+        stats_table.setMaximumHeight(200)
+        stats_layout.addWidget(stats_table)
+        top_splitter.addWidget(stats_group)
 
-            # Target labels (smaller, showing actual company names)
-            target_labels = {k: v for k, v in labels.items() if k != source_cik}
-            nx.draw_networkx_labels(
-                G, pos,
-                labels=target_labels,
-                font_size=8,
-                font_weight='bold',
-                font_color='white',
-                ax=ax
-            )
+        main_splitter.addWidget(top_splitter)
 
-            # Title and styling
-            ax.set_title(f'Relationship Network for {ticker}',
-                        fontsize=16, fontweight='bold', color='white', pad=20)
-            ax.axis('off')
+        relationship_group = QGroupBox("Relationship Details")
+        relationship_layout = QVBoxLayout(relationship_group)
+        table = QTableWidget()
+        table.setColumnCount(5)
+        table.setHorizontalHeaderLabels(["Target", "Type", "Confidence", "Direction", "Notes"])
+        table.setRowCount(len(relationships))
+        for row, rel in enumerate(relationships):
+            target = rel.get('target_name') or rel.get('target_cik') or 'Unknown'
+            rel_type = rel.get('relationship_type', 'unknown')
+            confidence = rel.get('confidence_score', 0)
+            direction = "Outgoing" if rel.get('source_cik') == source_cik else "Incoming"
+            notes = rel.get('notes', rel.get('context') or '')
+            table.setItem(row, 0, QTableWidgetItem(target))
+            table.setItem(row, 1, QTableWidgetItem(rel_type.title()))
+            table.setItem(row, 2, QTableWidgetItem(f"{confidence:.2f}"))
+            table.setItem(row, 3, QTableWidgetItem(direction))
+            note_item = QTableWidgetItem(notes)
+            note_item.setFlags(note_item.flags() & ~Qt.ItemIsEditable)
+            table.setItem(row, 4, note_item)
+        table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        relationship_layout.addWidget(table)
 
-            # Add legend
-            from matplotlib.patches import Patch
-            legend_elements = [
-                Patch(facecolor=color, label=rel_type.title())
-                for rel_type, color in edge_colors.items()
-                if rel_type in type_counts
-            ]
-            ax.legend(handles=legend_elements, loc='upper right',
-                     facecolor='#2d2d2d', edgecolor='white',
-                     labelcolor='white', fontsize=10)
+        instruction = QLabel("💡 Select a row to highlight the node in the graph once implemented.")
+        instruction.setStyleSheet("color: #4da6ff; font-size: 10px; padding: 4px;")
+        relationship_layout.addWidget(instruction)
 
-            # === ADD INTERACTIVITY ===
-
-            # Create annotation for hover tooltips
-            annot = ax.annotate("", xy=(0,0), xytext=(15,15),
-                               textcoords="offset points",
-                               bbox=dict(boxstyle="round,pad=0.8", fc="#1e1e1e", ec="#4da6ff", lw=2, alpha=0.95),
-                               color='white',
-                               fontsize=10,
-                               fontweight='bold',
-                               visible=False,
-                               zorder=1000)
-
-            # Mouse event handlers
-            def on_hover(event):
-                """Show tooltip when hovering over nodes"""
-                if self.is_dragging:
-                    return
-
-                if event.inaxes == ax and event.xdata and event.ydata:
-                    # Find closest node
-                    min_dist = float('inf')
-                    closest_node = None
-
-                    for node_cik, (x, y) in pos.items():
-                        dist = ((x - event.xdata)**2 + (y - event.ydata)**2)**0.5
-                        size = 3000 if node_cik == source_cik else 1000
-                        radius = (size / 1000) ** 0.5 * 0.05
-
-                        if dist < radius and dist < min_dist:
-                            min_dist = dist
-                            closest_node = node_cik
-
-                    if closest_node and closest_node != self.last_hover_node:
-                        self.last_hover_node = closest_node
-                        node_name = cik_to_name.get(closest_node, 'Unknown')
-                        node_type = "Source Company" if closest_node == source_cik else "Target Company"
-                        degree = G.degree(closest_node)
-
-                        annot.xy = pos[closest_node]
-                        text = f"{node_name}\n{node_type}\n{degree} connections"
-                        annot.set_text(text)
-                        annot.set_visible(True)
-                        canvas.draw_idle()
-                    elif not closest_node and self.last_hover_node:
-                        self.last_hover_node = None
-                        annot.set_visible(False)
-                        canvas.draw_idle()
-
-            def on_click(event):
-                """Handle click events - show details"""
-                if self.is_dragging:
-                    return
-
-                if event.inaxes == ax and event.xdata and event.ydata:
-                    # Find clicked node
-                    for node_cik, (x, y) in pos.items():
-                        dist = ((x - event.xdata)**2 + (y - event.ydata)**2)**0.5
-                        size = 3000 if node_cik == source_cik else 1000
-                        radius = (size / 1000) ** 0.5 * 0.05
-
-                        if dist < radius:
-                            node_name = cik_to_name.get(node_cik, 'Unknown')
-                            # Count relationships
-                            rels = [r for r in relationships if r.get('target_cik') == node_cik or source_cik == node_cik]
-
-                            from PySide6.QtWidgets import QMessageBox
-                            msg = QMessageBox()
-                            msg.setWindowTitle(f"Node Details - {node_name}")
-                            msg.setText(f"<h2>{node_name}</h2><p>CIK: {node_cik}<br>Connections: {G.degree(node_cik)}</p>")
-                            msg.setStyleSheet("background-color: #1e1e1e; color: white;")
-                            msg.exec()
-                            return
-
-            def on_press(event):
-                """Start dragging with right-click"""
-                if event.button != 3:  # Not right-click
-                    return
-
-                if event.inaxes == ax and event.xdata and event.ydata:
-                    for node_cik, (x, y) in pos.items():
-                        dist = ((x - event.xdata)**2 + (y - event.ydata)**2)**0.5
-                        size = 3000 if node_cik == source_cik else 1000
-                        radius = (size / 1000) ** 0.5 * 0.05
-
-                        if dist < radius:
-                            self.selected_node = node_cik
-                            x0, y0 = pos[node_cik]
-                            self.drag_offset = (x0 - event.xdata, y0 - event.ydata)
-                            self.is_dragging = False
-                            break
-
-            def on_motion(event):
-                """Drag node if selected"""
-                if self.selected_node and event.inaxes == ax and event.xdata and event.ydata:
-                    self.is_dragging = True
-                    if annot.get_visible():
-                        annot.set_visible(False)
-
-                    # Update position
-                    x = event.xdata + self.drag_offset[0]
-                    y = event.ydata + self.drag_offset[1]
-                    pos[self.selected_node] = (x, y)
-
-                    # Redraw
-                    ax.clear()
-                    ax.set_facecolor('#2d2d2d')
-                    ax.axis('off')
-
-                    # Redraw edges
-                    for edge in G.edges(data=True):
-                        source, target, data = edge
-                        rel_type = data.get('relationship', 'unknown')
-                        color = edge_colors.get(rel_type, '#6c757d')
-                        confidence = data.get('confidence', 0)
-
-                        nx.draw_networkx_edges(
-                            G, pos,
-                            edgelist=[(source, target)],
-                            edge_color=color,
-                            alpha=min(0.3 + confidence * 0.7, 1.0),
-                            width=1 + confidence * 2,
-                            arrows=True,
-                            arrowsize=10,
-                            ax=ax
-                        )
-
-                    # Redraw nodes
-                    nx.draw_networkx_nodes(G, pos, nodelist=[source_cik],
-                                          node_color='#4da6ff', node_size=3000, alpha=0.9, ax=ax)
-                    if target_nodes:
-                        nx.draw_networkx_nodes(G, pos, nodelist=target_nodes,
-                                              node_color='#7fb3d5', node_size=1000, alpha=0.7, ax=ax)
-
-                    # Redraw labels
-                    nx.draw_networkx_labels(G, pos, labels={source_cik: labels[source_cik]},
-                                           font_size=12, font_weight='bold', font_color='white', ax=ax)
-                    nx.draw_networkx_labels(G, pos, labels=target_labels,
-                                           font_size=8, font_weight='bold', font_color='white', ax=ax)
-
-                    ax.set_title(f'Relationship Network for {ticker}',
-                               fontsize=16, fontweight='bold', color='white', pad=20)
-                    canvas.draw_idle()
-
-            def on_release(event):
-                """Stop dragging"""
-                self.selected_node = None
-                self.drag_offset = None
-                if self.is_dragging:
-                    self.is_dragging = False
-
-            # Connect events
-            canvas.mpl_connect('motion_notify_event', on_hover)
-            canvas.mpl_connect('button_press_event', on_click)
-            canvas.mpl_connect('button_press_event', on_press)
-            canvas.mpl_connect('motion_notify_event', on_motion)
-            canvas.mpl_connect('button_release_event', on_release)
-
-            fig.tight_layout()
-            layout.addWidget(canvas)
-
-            # Add statistics table below graph
-            stats_group = QGroupBox("Relationship Statistics")
-            stats_layout = QVBoxLayout(stats_group)
-
-            stats_table = QTableWidget()
-            stats_table.setColumnCount(3)
-            stats_table.setHorizontalHeaderLabels(["Relationship Type", "Count", "Avg Confidence"])
-            stats_table.setRowCount(len(type_counts))
-
-            for i, (rel_type, count) in enumerate(sorted(type_counts.items(), key=lambda x: x[1], reverse=True)):
-                # Calculate average confidence for this type
-                type_rels = [r for r in relationships if r.get('relationship_type') == rel_type]
-                avg_conf = sum(r.get('confidence_score', 0) for r in type_rels) / len(type_rels) if type_rels else 0
-
-                stats_table.setItem(i, 0, QTableWidgetItem(rel_type.title()))
-                stats_table.setItem(i, 1, QTableWidgetItem(str(count)))
-
-                conf_item = QTableWidgetItem(f"{avg_conf:.2f}")
-                # Color code confidence
-                if avg_conf >= 0.8:
-                    conf_item.setForeground(QColor("#28a745"))
-                elif avg_conf >= 0.6:
-                    conf_item.setForeground(QColor("#ffc107"))
-                else:
-                    conf_item.setForeground(QColor("#dc3545"))
-                stats_table.setItem(i, 2, conf_item)
-
-            stats_table.resizeColumnsToContents()
-            stats_table.setMaximumHeight(200)
-            stats_layout.addWidget(stats_table)
-            layout.addWidget(stats_group)
-
-        except Exception as e:
-            error_label = QLabel(f"Error creating relationship graph: {str(e)}")
-            error_label.setStyleSheet("color: #dc3545; padding: 20px;")
-            error_label.setWordWrap(True)
-            layout.addWidget(error_label)
-            import traceback
-            print(f"Graph error: {traceback.format_exc()}")
+        main_splitter.addWidget(relationship_group)
+        layout.addWidget(main_splitter)
 
         return tab
 
@@ -2536,6 +2897,20 @@ class ProfileVisualizationWindow(QDialog):
         layout.addWidget(lbl, row, 0, Qt.AlignRight)
         layout.addWidget(val, row, 1, Qt.AlignLeft)
 
+    def _redirect_canvas_wheel_to_scroll(self, canvas, scroll_area):
+        """Override canvas wheel event to scroll the parent scroll area."""
+        def _wheel_event(self, event, scroll=scroll_area):
+            delta = event.angleDelta().y()
+            if delta == 0:
+                event.ignore()
+                return
+            bar = scroll.verticalScrollBar()
+            step = int(-delta / 120 * bar.singleStep())
+            bar.setValue(bar.value() + step)
+            event.accept()
+
+        canvas.wheelEvent = MethodType(_wheel_event, canvas)
+
     def _is_recent_filing(self, filing_date: str, months: int = 24) -> bool:
         """Check if filing date is within the last N months."""
         if not filing_date or filing_date == 'N/A':
@@ -2547,3 +2922,52 @@ class ProfileVisualizationWindow(QDialog):
             return filing_dt >= cutoff_date
         except:
             return False
+
+    def create_filing_viewer_tab(self) -> QWidget:
+        """Create SEC filing viewer tab with integrated filing browser."""
+        try:
+            from src.ui.filing_viewer_widget import FilingViewerWidget
+
+            # Get company info
+            company_info = self.profile.get('company_info', {})
+            ticker = company_info.get('ticker', 'N/A')
+            cik = company_info.get('cik', 'N/A')
+
+            # Create filing viewer widget
+            viewer = FilingViewerWidget()
+
+            # Load company filings automatically
+            if ticker != 'N/A' and cik != 'N/A':
+                try:
+                    viewer.load_company_filings(ticker, cik)
+                    logger.info(f"Filing viewer loaded for {ticker}")
+                except Exception as e:
+                    logger.error(f"Error loading filings for {ticker}: {e}")
+
+            return viewer
+
+        except ImportError as e:
+            logger.error(f"FilingViewerWidget not available: {e}")
+            # Create fallback widget
+            fallback = QWidget()
+            layout = QVBoxLayout(fallback)
+
+            error_label = QLabel("SEC Filing Viewer not available\n\nThe filing viewer module could not be loaded.")
+            error_label.setAlignment(Qt.AlignCenter)
+            error_label.setStyleSheet("color: #ff6b6b; font-size: 12px; padding: 20px;")
+            layout.addWidget(error_label)
+
+            return fallback
+
+        except Exception as e:
+            logger.error(f"Error creating filing viewer tab: {e}", exc_info=True)
+            # Create error widget
+            error_widget = QWidget()
+            layout = QVBoxLayout(error_widget)
+
+            error_label = QLabel(f"Error loading filing viewer:\n{str(e)}")
+            error_label.setAlignment(Qt.AlignCenter)
+            error_label.setStyleSheet("color: #ff6b6b; padding: 20px;")
+            layout.addWidget(error_label)
+
+            return error_widget

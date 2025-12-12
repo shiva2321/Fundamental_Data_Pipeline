@@ -8,7 +8,8 @@ import logging
 from typing import Dict, List, Any, Optional, Callable
 from datetime import datetime
 
-from src.extractors.company_mention_extractor import CompanyMentionExtractorWithAliases
+# ✅ NEW: Use NER-based extractor instead of fuzzy matching against 10k companies
+from src.extractors.ner_company_extractor import FastCompanyExtractor
 from src.extractors.relationship_context_extractor import (
     RelationshipContextExtractor,
     RelationshipStrengthCalculator
@@ -28,30 +29,34 @@ class RelationshipDataIntegrator:
     during profile generation.
 
     Workflow:
-    1. Extract company mentions from filing text
+    1. Extract company mentions from filing text using NER/patterns
     2. Extract relationship context between mentioned companies
     3. Extract financial relationship data (customers, suppliers)
     4. Store all relationships in MongoDB for graph generation
+
+    ✅ OPTIMIZATION: No longer requires loading 10k+ SEC companies.
+    Uses NER-based extraction to find ALL companies (public, private, foreign).
     """
 
-    def __init__(self, mongo_wrapper, ticker_fetcher, all_companies: List[Dict]):
+    def __init__(self, mongo_wrapper, ticker_fetcher=None, all_companies: List[Dict] = None):
         """
         Initialize integrator.
 
         Args:
             mongo_wrapper: MongoDB wrapper for storing data
-            ticker_fetcher: Ticker fetcher for company info
-            all_companies: List of all companies in database
+            ticker_fetcher: Ticker fetcher for company info (optional, kept for compatibility)
+            all_companies: List of all companies in database (optional, no longer needed)
         """
         self.mongo = mongo_wrapper
-        self.ticker_fetcher = ticker_fetcher
-        self.all_companies = all_companies
+        self.ticker_fetcher = ticker_fetcher  # Keep for compatibility but not used
+        self.all_companies = all_companies or []  # Keep for compatibility but not used
 
-        # Initialize extractors
-        self.company_mention_extractor = CompanyMentionExtractorWithAliases(all_companies)
+        # ✅ NEW: Initialize NER-based extractor (no company database needed)
+        self.company_mention_extractor = FastCompanyExtractor()
         self.relationship_context_extractor = RelationshipContextExtractor()
         self.financial_extractor = FinancialRelationshipsExtractor()
         self.key_person_extractor = KeyPersonInterlockExtractor()
+        self.parsers_available = True  # ✅ Flag to track if extraction is possible
 
         logger.info("RelationshipDataIntegrator initialized")
 
@@ -105,107 +110,228 @@ class RelationshipDataIntegrator:
             }
         }
 
-        # 1. EXTRACT COMPANY MENTIONS from 10-K MD&A and Risk sections
-        log('info', 'Extracting company mentions from filing text')
+        if not self.parsers_available:
+            result['error'] = 'Content parsers not available'
+            return result
+
+        # === PARALLEL EXTRACTION: Process all relationship extraction tasks concurrently ===
+        # Instead of sequential processing (mentions → context → financial → documents),
+        # run extraction tasks in parallel to maintain full data while improving speed
+
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        import threading
+
+        logger.info(f"Starting parallel relationship extraction for {company_name}")
+        log('info', 'Extracting relationships in parallel...')
+
+        # ✅ Send progress callback to UI
+        if progress_callback:
+            progress_callback('info', "Extracting company mentions and relationships...")
+
+        # Thread-safe lock for updating shared result
+        result_lock = threading.Lock()
+
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            # Submit all relationship extraction tasks in parallel
+            futures = {}
+
+            # Task 1: Extract company mentions
+            futures[executor.submit(
+                self._task_extract_mentions, filings_text
+            )] = 'mentions'
+
+            # Task 2: Extract relationship context (if mentions available)
+            futures[executor.submit(
+                self._task_extract_context, filings_text, cik
+            )] = 'context'
+
+            # Task 3: Extract financial relationships
+            futures[executor.submit(
+                self._task_extract_financial, filings_text
+            )] = 'financial'
+
+            # Task 4: Prepare for document creation
+            futures[executor.submit(
+                lambda: {'cik': cik, 'name': company_name, 'generated_at': profile.get('generated_at', datetime.utcnow().isoformat())}
+            )] = 'metadata'
+
+            # Collect results as they complete
+            completed_tasks = 0
+            total_tasks = len(futures)
+
+            for future in as_completed(futures, timeout=120):  # 2 minute total timeout
+                completed_tasks += 1
+                task_name = futures[future]
+                try:
+                    task_result = future.result()
+
+                    with result_lock:
+                        if task_name == 'mentions':
+                            if task_result:
+                                relationships_data['company_mentions'] = task_result.get('mentions', {})
+                                relationships_data['extraction_metadata']['extraction_methods'].append('company_mention')
+                                log('info', f"✓ Extracted {len(task_result.get('mentions', {}))} company mentions")
+                                # ✅ Progress callback
+                                if progress_callback:
+                                    progress_pct = int(50 + (completed_tasks / total_tasks) * 15)
+                                    progress_callback('info', f"Progress: Relationship extraction ({progress_pct}%)")
+
+                        elif task_name == 'context':
+                            if task_result:
+                                relationships_data['relationships'] = task_result.get('relationships', [])
+                                relationships_data['extraction_metadata']['extraction_methods'].append('relationship_context')
+                                log('info', f"✓ Extracted {len(task_result.get('relationships', []))} relationships")
+                                # ✅ Progress callback
+                                if progress_callback:
+                                    progress_pct = int(50 + (completed_tasks / total_tasks) * 15)
+                                    progress_callback('info', f"Progress: Relationship extraction ({progress_pct}%)")
+
+                        elif task_name == 'financial':
+                            if task_result:
+                                relationships_data['financial_relationships'] = task_result.get('financial_rels', {})
+                                relationships_data['extraction_metadata']['extraction_methods'].append('financial_relationships')
+                                log('info', f"✓ Extracted financial relationships: "
+                                    f"{len(task_result.get('financial_rels', {}).get('customers', []))} customers, "
+                                    f"{len(task_result.get('financial_rels', {}).get('suppliers', []))} suppliers")
+                                # ✅ Progress callback
+                                if progress_callback:
+                                    progress_pct = int(50 + (completed_tasks / total_tasks) * 15)
+                                    progress_callback('info', f"Progress: Relationship extraction ({progress_pct}%)")
+
+                        elif task_name == 'metadata':
+                            metadata = task_result
+                            # Store for document creation
+                            relationships_data['_metadata'] = metadata
+
+                except Exception as e:
+                    logger.error(f"Error in {task_name} extraction: {e}")
+                    log('error', f"✗ {task_name} extraction failed: {str(e)[:50]}")
+
+        # 4. CREATE RELATIONSHIP DOCUMENTS for MongoDB (sequential after parallel extraction)
+        log('info', 'Creating relationship documents for storage')
+        try:
+            if '_metadata' in relationships_data:
+                metadata = relationships_data.pop('_metadata')
+                relationship_docs = self._create_relationship_documents(
+                    metadata['cik'],
+                    metadata['name'],
+                    relationships_data,
+                    metadata['generated_at']
+                )
+                relationships_data['relationship_documents'] = relationship_docs
+                log('info', f"Created {len(relationship_docs)} relationship documents")
+        except Exception as e:
+            logger.error(f"Error creating relationship documents: {e}")
+
+        log('info', 'Relationship extraction complete')
+        return relationships_data
+
+    def _task_extract_mentions(self, filings_text: Dict[str, str]) -> Optional[Dict[str, Any]]:
+        """Extract company mentions using NER/pattern matching (parallel task)"""
         try:
             text_to_analyze = self._compile_text_for_analysis(filings_text)
 
-            company_mentions = self.company_mention_extractor.extract_mentions(text_to_analyze)
-            relationships_data['company_mentions'] = {
-                f"{cik}_{mention[0]}": {
-                    'source_cik': cik,
-                    'target_cik': mention[0],
-                    'target_name': mention[1],
-                    'confidence': mention[2]
+            # ✅ NEW: Extract companies using NER-based approach
+            # Returns: [{'name', 'count', 'confidence', 'contexts', 'relationship_type'}, ...]
+            company_mentions = self.company_mention_extractor.extract_companies(
+                text_to_analyze,
+                min_mentions=2,  # Only companies mentioned 2+ times
+                max_companies=100  # Limit to top 100 companies
+            )
+
+            logger.info(f"✓ Extracted {len(company_mentions)} company mentions using NER")
+
+            # Convert to dict format for storage
+            mentions_dict = {}
+            for idx, mention in enumerate(company_mentions):
+                # Use company name as key (no CIK needed for non-SEC companies)
+                company_key = mention['name'].lower().replace(' ', '_')
+                mentions_dict[company_key] = {
+                    'target_name': mention['name'],
+                    'mention_count': mention['count'],
+                    'confidence': mention['confidence'],
+                    'relationship_type': mention.get('relationship_type'),
+                    'sample_context': mention.get('contexts', [])[0] if mention.get('contexts') else None
                 }
-                for mention in company_mentions
-            }
 
-            relationships_data['extraction_metadata']['extraction_methods'].append('company_mention')
-            log('info', f"Extracted {len(company_mentions)} company mentions")
-
+            return {'mentions': mentions_dict}
         except Exception as e:
-            logger.error(f"Error extracting company mentions: {e}")
+            logger.error(f"Error in mention extraction: {e}")
+            return None
 
-        # 2. EXTRACT RELATIONSHIP CONTEXT between companies
-        log('info', 'Extracting relationship context')
+    def _task_extract_context(self, filings_text: Dict[str, str], cik: str) -> Optional[Dict[str, Any]]:
+        """Extract relationship context (parallel task)"""
         try:
+            text_to_analyze = self._compile_text_for_analysis(filings_text)
+
+            # ✅ NEW: Extract companies using NER
+            company_mentions = self.company_mention_extractor.extract_companies(
+                text_to_analyze,
+                min_mentions=2
+            )
+
             if company_mentions and text_to_analyze:
+                # Convert NER format to format expected by relationship_context_extractor
+                # Old format: [(cik, name, confidence), ...]
+                # New format: Use company names as unique IDs (since CIK not available)
+                mention_tuples = [
+                    (mention['name'].lower().replace(' ', '_'), mention['name'], mention['confidence'])
+                    for mention in company_mentions
+                ]
+
                 relationships = self.relationship_context_extractor.extract_relationships(
                     text_to_analyze,
-                    company_mentions,
+                    mention_tuples,
                     cik
                 )
 
-                # Enrich relationships with company names
-                for rel in relationships:
-                    target_company = self.ticker_fetcher.get_by_cik(rel['target_cik'])
-                    if target_company:
-                        rel['target_name'] = target_company.get('title', 'Unknown')
+                # Note: target_name and source_name are now included in the relationships
+                # target_cik may be a name-based ID (like "netflix_inc") instead of numeric CIK
 
-                relationships_data['relationships'] = relationships
-                relationships_data['extraction_metadata']['extraction_methods'].append('relationship_context')
-                log('info', f"Extracted {len(relationships)} relationships")
-
+                return {'relationships': relationships}
+            return {'relationships': []}
         except Exception as e:
-            logger.error(f"Error extracting relationship context: {e}")
+            logger.error(f"Error in context extraction: {e}")
+            return None
 
-        # 3. EXTRACT FINANCIAL RELATIONSHIPS (customers, suppliers)
-        log('info', 'Extracting financial relationships')
+    def _task_extract_financial(self, filings_text: Dict[str, str]) -> Optional[Dict[str, Any]]:
+        """Extract financial relationships (parallel task)"""
         try:
-            # Get 10-K text if available
             k_text = filings_text.get('10-K', '') or filings_text.get('10-Q', '')
 
             if k_text:
-                # Extract customers
                 customers = self.financial_extractor.extract_customers(k_text)
-                relationships_data['financial_relationships']['customers'] = customers
-
-                # Extract suppliers
                 suppliers = self.financial_extractor.extract_suppliers(k_text)
-                relationships_data['financial_relationships']['suppliers'] = suppliers
-
-                # Extract segments
                 segments = self.financial_extractor.extract_segments(k_text)
-                relationships_data['financial_relationships']['segments'] = segments
-
-                # Extract supply chain risks
                 risks = self.financial_extractor.extract_supply_chain_risks(k_text)
-                relationships_data['financial_relationships']['supply_chain_risks'] = risks
 
-                # Calculate concentration metrics
+                financial_rels = {
+                    'customers': customers,
+                    'suppliers': suppliers,
+                    'segments': segments,
+                    'supply_chain_risks': risks
+                }
+
+                # Calculate concentration metrics if we have customers
                 if customers:
                     hhi = CustomerConcentrationAnalyzer.calculate_herfindahl_index(customers)
                     cr5 = CustomerConcentrationAnalyzer.calculate_concentration_ratio(customers, 5)
-                    relationships_data['financial_relationships']['customer_concentration'] = {
+                    financial_rels['customer_concentration'] = {
                         'herfindahl_index': hhi,
                         'hhi_level': self._classify_hhi(hhi),
                         'top_5_concentration': cr5
                     }
 
-                relationships_data['extraction_metadata']['extraction_methods'].append('financial_relationships')
-                log('info', f"Extracted {len(customers)} customers, {len(suppliers)} suppliers, {len(segments)} segments")
-
+                return {'financial_rels': financial_rels}
+            return {'financial_rels': {
+                'customers': [],
+                'suppliers': [],
+                'segments': {},
+                'supply_chain_risks': {}
+            }}
         except Exception as e:
-            logger.error(f"Error extracting financial relationships: {e}")
-
-        # 4. CREATE RELATIONSHIP DOCUMENTS for MongoDB
-        log('info', 'Creating relationship documents for storage')
-        try:
-            relationship_docs = self._create_relationship_documents(
-                cik,
-                company_name,
-                relationships_data,
-                profile.get('generated_at', datetime.utcnow().isoformat())
-            )
-
-            relationships_data['relationship_documents'] = relationship_docs
-            log('info', f"Created {len(relationship_docs)} relationship documents")
-
-        except Exception as e:
-            logger.error(f"Error creating relationship documents: {e}")
-
-        log('info', 'Relationship extraction complete')
+            logger.error(f"Error in financial extraction: {e}")
+            return None
         return relationships_data
 
     def store_relationships_in_profile(
@@ -485,4 +611,3 @@ class RelationshipDataIntegrator:
 
         except Exception as e:
             logger.error(f"Error analyzing key person interlocks: {e}")
-

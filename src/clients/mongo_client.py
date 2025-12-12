@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 try:
     from pymongo import MongoClient, ASCENDING, errors
 except ImportError as e:
-    raise ImportError("pymongo is required for MongoDB functionality. Install with `pip install pymongo`") from e
+    raise ImportError("pymongo is required for MongoDB functionality. Install with `pip install pymongo`")(e)
 
 logger = logging.getLogger("pipeline")
 

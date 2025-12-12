@@ -158,7 +158,9 @@ class RelationshipContextExtractor:
                         if rel_type != RelationshipType.UNKNOWN:
                             relationships.append({
                                 'source_cik': cik1,
+                                'source_name': name1,  # ✅ Add source name
                                 'target_cik': cik2,
+                                'target_name': name2,  # ✅ Add target name
                                 'relationship_type': rel_type.value,
                                 'confidence_score': strength * min(conf1, conf2),
                                 'context': sentence[:300],
@@ -177,7 +179,9 @@ class RelationshipContextExtractor:
                 if rel_type != RelationshipType.UNKNOWN:
                     relationships.append({
                         'source_cik': source_cik,
+                        'source_name': 'Source Company',  # ✅ Add source name
                         'target_cik': cik,
+                        'target_name': name,  # ✅ Add target name
                         'relationship_type': rel_type.value,
                         'confidence_score': strength * conf,
                         'context': sentence[:300],

@@ -7,6 +7,98 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.0.2] - 2025-12-12
+
+### 🧹 Documentation Consolidation & Cleanup
+
+Reduced documentation from 23 files to 10 core files. Removed all redundant and duplicate documentation.
+
+### Removed
+- `EXTRACTION_ARCHITECTURE.md` (consolidated into EXTRACTION.md)
+- `VISUAL_COMPARISON.md` (superseded by performance metrics)
+- `IMPLEMENTATION_DETAILS.md` (consolidated into ARCHITECTURE.md)
+- `TECHNICAL_DETAILS.md` (consolidated into EXTRACTION.md & ARCHITECTURE.md)
+- `ARCHITECTURE_DIAGRAM.md` (superseded by ARCHITECTURE.md)
+- `SEC_DATA_STRUCTURE_GUIDE.md` (consolidated into DATA_DICTIONARY.md)
+- `QUICK_REFERENCE_KEY_PERSONS.md` (merged into QUICK_REFERENCE.md)
+- `RELATIONSHIP_EXTRACTION_QUICK_START.md` (integrated into EXTRACTION.md)
+- `RELATIONSHIP_EXTRACTION_INTEGRATION.md` (integrated into EXTRACTION.md)
+- `NARRATIVE_PARSER_GUIDE.md` (integrated into EXTRACTION.md)
+- `KEY_PERSONS_FINAL_FIX.md` (integrated into EXTRACTION.md)
+- `CHANGELOG.md` from docs/ (kept only at root level)
+- `CLEANUP_SUMMARY.md` (temporary documentation)
+
+### Updated
+- **README.md**: Simplified documentation references
+- **docs/INDEX.md**: Reduced to lean navigation guide
+- **docs/EXTRACTION.md**: Now comprehensive extraction reference (includes relationship, key persons, parsers)
+
+### Benefits
+- ✅ Reduced doc files by 52% (23 → 10)
+- ✅ Single source of truth for each topic
+- ✅ Easier to maintain and keep in sync
+- ✅ Cleaner repository structure
+- ✅ All content preserved (consolidated, not deleted)
+
+### Core Documentation (10 Files)
+1. `GETTING_STARTED.md` - Setup and installation
+2. `ARCHITECTURE.md` - System design
+3. `QUICK_REFERENCE.md` - Quick commands
+4. `EXTRACTION.md` - Filing extraction and relationships
+5. `DATA_DICTIONARY.md` - Data reference
+6. `PARALLELIZATION.md` - Parallel processing
+7. `PERFORMANCE.md` - Performance metrics
+8. `CACHE_SYSTEM.md` - Caching strategies
+9. `QUALITY_CONTROL.md` - Validation
+10. `AI_SETUP_GUIDE.md` - AI/LLM setup
+
+---
+
+## [2.0.1] - 2025-12-12
+
+### 🧹 Documentation & Repository Cleanup
+
+This release focuses on project organization and documentation consolidation.
+
+### Added
+- **Documentation Index** (`docs/INDEX.md`)
+  - Master reference for all documentation
+  - Quick start paths for different user roles
+  - Category-based organization
+  - Links to all guides and references
+
+- **Documentation Archive** (`docs/_archive/`)
+  - Historical reorganization documents
+  - Process documentation
+  - Preserved for reference without cluttering active docs
+
+### Removed
+- **Temporary Diagnostic Files** (from root)
+  - `ZERO_RELATIONSHIPS_ANALYSIS.md` (diagnostic from troubleshooting)
+  - `SEC_FILING_VIEWER_COMPLETE.md` (implementation summary)
+  - `QUICK_FIXES_GUIDE.md` (temporary fix documentation)
+
+### Changed
+- **README.md Documentation Section**
+  - Added reference to new Documentation Index
+  - Reorganized documentation references into categories
+  - Removed broken link to non-existent file
+
+### Archived
+- Historical process documents moved to `docs/_archive/`:
+  - `REORGANIZATION_SUMMARY.md`
+  - `REORGANIZATION_PLAN.md`
+  - `DOCUMENTATION_REORGANIZATION.md`
+  - `DOCUMENTATION_UPDATE_SUMMARY.md`
+  - `EMPTY_FILES_CLEANUP_REPORT.md`
+
+### Documentation
+- All documentation remains in `docs/` directory (no content lost)
+- Better organization for maintainability
+- Clear navigation through INDEX.md
+
+---
+
 ## [2.0.0] - 2025-12-07
 
 ### 🚀 Major Release: Parallel Processing Implementation

@@ -131,19 +131,23 @@ Fundamental_Data_Pipeline/
 
 ## 📖 Documentation
 
-Comprehensive documentation is available in the `docs/` directory:
+All essential documentation is in the `docs/` directory.
 
-| Document | Description |
-|----------|-------------|
-| [GETTING_STARTED.md](docs/GETTING_STARTED.md) | Step-by-step setup and first profile generation |
-| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Technical architecture, system components, and data flow |
-| [DATA_DICTIONARY.md](docs/DATA_DICTIONARY.md) | Complete reference for all data points and metrics |
-| [CHANGELOG.md](docs/CHANGELOG.md) | Version history and recent changes |
-| [PARALLEL_PROCESSING_IMPLEMENTATION.md](PARALLEL_PROCESSING_IMPLEMENTATION.md) | **NEW**: Parallel processing architecture and performance |
-| [QUALITY_CONTROL.md](docs/QUALITY_CONTROL.md) | Profile validation and error management guide |
-| [NARRATIVE_PARSER_GUIDE.md](docs/NARRATIVE_PARSER_GUIDE.md) | 10-K/10-Q narrative section extraction guide |
-| [KEY_PERSONS_FINAL_FIX.md](docs/KEY_PERSONS_FINAL_FIX.md) | Key persons parser implementation details |
-| [AI_SETUP_GUIDE.md](docs/AI_SETUP_GUIDE.md) | AI/ML setup with Ollama |
+| Document | Purpose |
+|----------|---------|
+| [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md) | Setup and first profile generation |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System design and component overview |
+| [docs/QUICK_REFERENCE.md](docs/QUICK_REFERENCE.md) | Common tasks and quick reference |
+| [docs/EXTRACTION.md](docs/EXTRACTION.md) | Filing extraction, parsers, relationships |
+| [docs/DATA_DICTIONARY.md](docs/DATA_DICTIONARY.md) | Complete data field reference |
+| [docs/PARALLELIZATION.md](docs/PARALLELIZATION.md) | Parallel processing architecture |
+| [docs/PERFORMANCE.md](docs/PERFORMANCE.md) | Performance optimization |
+| [docs/CACHE_SYSTEM.md](docs/CACHE_SYSTEM.md) | Caching strategies |
+| [docs/QUALITY_CONTROL.md](docs/QUALITY_CONTROL.md) | Validation and error handling |
+| [docs/AI_SETUP_GUIDE.md](docs/AI_SETUP_GUIDE.md) | AI/LLM setup with Ollama |
+
+**Quick Start**: See [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md)  
+**Full Navigation**: See [docs/INDEX.md](docs/INDEX.md)
 
 ---
 

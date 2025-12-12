@@ -31,7 +31,7 @@ class SECFilingContentFetcher:
         })
         self.rate_limit = 0.1  # 10 requests per second (SEC limit)
 
-    def fetch_filing_content(self, cik: str, accession_number: str, max_retries: int = 3) -> Optional[str]:
+    def fetch_filing_content(self, cik: str, accession_number: str, max_retries: int = 1) -> Optional[str]:
         """
         Fetch the actual filing content (HTML/XML).
         Content is cached for future use to avoid re-fetching from SEC.
@@ -39,7 +39,7 @@ class SECFilingContentFetcher:
         Args:
             cik: Company CIK
             accession_number: Filing accession number (e.g., '0001065280-25-000123')
-            max_retries: Maximum number of retry attempts
+            max_retries: Maximum number of retry attempts (reduced to 1 to prevent hanging)
 
         Returns:
             Filing content as string or None if failed
@@ -71,7 +71,7 @@ class SECFilingContentFetcher:
             for url in potential_urls:
                 try:
                     time.sleep(self.rate_limit)
-                    response = self.session.get(url, timeout=30)
+                    response = self.session.get(url, timeout=15)  # Reduced from 30 to 15 seconds
 
                     if response.status_code == 200:
                         content = response.text
@@ -90,7 +90,7 @@ class SECFilingContentFetcher:
                     logger.debug(f"Attempt {attempt + 1} failed for {url}: {e}")
                     continue
 
-        logger.warning(f"Could not fetch filing content for {accession_number}")
+        logger.debug(f"Could not fetch filing content for {accession_number}")
         return None
 
     def fetch_filing_index(self, cik: str, accession_number: str) -> Optional[Dict[str, str]]:

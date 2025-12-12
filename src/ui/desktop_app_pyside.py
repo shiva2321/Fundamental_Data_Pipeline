@@ -1907,8 +1907,31 @@ class MainWindow(QMainWindow):
                 info = p.get('company_info', {})
                 meta = p.get('filing_metadata', {})
 
-                self.profiles_table.setItem(row, 0, QTableWidgetItem(info.get('ticker', 'N/A')))
-                self.profiles_table.setItem(row, 1, QTableWidgetItem(info.get('name', 'N/A')))
+                # Ticker
+                ticker_val = info.get('ticker') or p.get('ticker') or 'N/A'
+                self.profiles_table.setItem(row, 0, QTableWidgetItem(ticker_val))
+
+                # Name: prefer explicit 'name', then 'title', then try to look up via ticker_fetcher
+                company_name = info.get('name') or info.get('title')
+                if not company_name or company_name == '' or company_name == ticker_val:
+                    try:
+                        # Try to resolve full company title using ticker or cik
+                        if ticker_val and hasattr(self, 'ticker_fetcher'):
+                            company = self.ticker_fetcher.get_by_ticker(ticker_val.upper())
+                            if company:
+                                company_name = company.get('title') or company.get('name') or company_name
+                        if (not company_name or company_name == '') and p.get('cik') and hasattr(self, 'ticker_fetcher'):
+                            company = self.ticker_fetcher.get_by_cik(p.get('cik'))
+                            if company:
+                                company_name = company.get('title') or company.get('name') or company_name
+                    except Exception:
+                        # Don't crash UI if ticker_fetcher lookup fails; fall back to available info
+                        pass
+
+                if not company_name:
+                    company_name = 'N/A'
+
+                self.profiles_table.setItem(row, 1, QTableWidgetItem(company_name))
                 self.profiles_table.setItem(row, 2, QTableWidgetItem(str(p.get('cik', 'N/A'))))
                 self.profiles_table.setItem(row, 3, QTableWidgetItem(str(p.get('generated_at', ''))[:19]))
                 
@@ -2016,7 +2039,14 @@ class MainWindow(QMainWindow):
 
             dialog = ProfilePeriodEditorDialog(ticker, cik, period_from, period_to, self)
             dialog.period_updated.connect(self.handle_period_update)
-            dialog.exec()
+            dialog.exec()  # Modal dialog - blocks until closed
+
+            # After dialog closes, refresh Queue Monitor to show any queued tasks
+            try:
+                if hasattr(self, 'refresh_queue'):
+                    self.refresh_queue()
+            except Exception as e:
+                logger.debug(f"Could not refresh queue after period update: {e}")
 
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to open period editor: {e}")
@@ -2040,6 +2070,9 @@ class MainWindow(QMainWindow):
         options['lookback_years'] = max(1, lookback_years)
         options['incremental'] = incremental
 
+        # ✅ Add ticker to queue table FIRST so it shows in Queue Monitor immediately
+        self._add_ticker_to_queue_table(ticker, TickerStatus.QUEUED.value)
+
         # Add to queue and process
         self.task_queue.put({
             'action': 'generate_profiles',
@@ -2047,6 +2080,19 @@ class MainWindow(QMainWindow):
             'options': options,
             'collection': self.config.get('collections', {}).get('profiles', 'Fundamental_Data_Pipeline')
         })
+
+        # ✅ Switch to Queue Monitor tab to show the queued task
+        try:
+            queue_monitor_index = None
+            for i in range(self.tabs.count()):
+                if self.tabs.tabText(i) == "Queue Monitor":
+                    queue_monitor_index = i
+                    break
+
+            if queue_monitor_index is not None:
+                self.tabs.setCurrentIndex(queue_monitor_index)
+        except Exception as e:
+            logger.debug(f"Could not switch to Queue Monitor tab: {e}")
 
         self.lbl_status.setText(f"Updating profile for {ticker} ({from_date} to {to_date})")
         QMessageBox.information(self, "Profile Update Started",
@@ -2208,7 +2254,7 @@ class MainWindow(QMainWindow):
             self.profiles_table.clearSelection()
 
     def visualize_profile(self):
-        """Open visualization window for selected profile(s)."""
+        """Open visualization window for selected profile(s) - non-blocking."""
         rows = self.profiles_table.selectionModel().selectedRows()
         if not rows:
             QMessageBox.warning(self, "No Selection", "Please select at least one profile to visualize.")
@@ -2216,9 +2262,10 @@ class MainWindow(QMainWindow):
         
         col_name = self.config.get('collections', {}).get('profiles', 'Fundamental_Data_Pipeline')
 
-        # Visualize each selected profile
+        # Visualize each selected profile (open in separate non-blocking window)
         for row in rows:
             cik = self.profiles_table.item(row.row(), 2).text()
+            ticker = self.profiles_table.item(row.row(), 0).text()
             profile = self.mongo.find_one(col_name, {'cik': cik})
 
             if not profile:
@@ -2226,9 +2273,23 @@ class MainWindow(QMainWindow):
                 continue
 
             try:
+                # Open visualization window in non-blocking mode (modeless dialog)
                 from src.ui.visualization_window import ProfileVisualizationWindow
                 viz_window = ProfileVisualizationWindow(profile, self.config, self, mongo=self.mongo)
-                viz_window.exec()
+                # Use show() instead of exec() to make it non-blocking
+                viz_window.show()
+
+                # Log for user feedback
+                self.log_message(f"📊 Opened visualization for {ticker} - tabs load on demand for performance")
+
+                # Keep reference to prevent garbage collection
+                if not hasattr(self, '_viz_windows'):
+                    self._viz_windows = []
+                self._viz_windows.append(viz_window)
+
+                # Clean up closed windows from list
+                self._viz_windows = [w for w in self._viz_windows if w.isVisible()]
+
             except Exception as e:
                 QMessageBox.critical(self, "Visualization Error", f"Failed to open visualization for {cik}: {e}")
                 logger.exception("Visualization error")
